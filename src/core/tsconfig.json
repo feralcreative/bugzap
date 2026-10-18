@@ -1,9 +1,11 @@
 {
   // Pure logic shared by the widget and the Worker: no DOM, no Workers APIs.
-  // Web Crypto and the other globals both runtimes have are declared by lib ES2022 + DOM-free types.
+  // WebWorker is the lib that declares what both runtimes share (Web Crypto,
+  // TextEncoder, URL, atob) without declaring document or window, so reaching
+  // for the DOM here is a type error rather than a review comment.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2022"],
+    "lib": ["ES2022", "WebWorker", "WebWorker.Iterable"],
     "types": []
   },
   "include": ["."]

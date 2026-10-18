@@ -10,15 +10,11 @@ Copied on 2026-10-18 from Routeloop (`~/www/moto/routeloop`) at commit `f46ca5a`
 
 - `docs/rider-feedback.md` is the design doc for the whole system: the vocabulary (a "report", never a "ticket"), the screens, why third-party tools were rejected, and every decision with its reasoning.
 
-### Pure logic, the most portable
+### Pure logic
 
-These import nothing but types, and each has a test in `test/` that runs with no database.
+Ported to `src/core/` on 2026-10-18 (issue #2) and deleted from here: `src/feedback/policy.ts` and `src/feedback/diagnostics.ts` (now `core/policy.ts` and `core/diagnostics.ts`), `src/images/policy.ts` (now `core/image-policy.ts`), and `src/maps/slug.ts` (now `core/ids.ts`), with their tests. `src/images/process.ts` and its test went at the same time without being ported, because Workers cannot run sharp; `core/image-strip.ts` does its metadata job instead.
 
-- `src/feedback/policy.ts` defines what a report is, who may see it, rate limits, and every status label. Its key rule is that a bug stays private to its author and the owner until published, which is a `state` column separate from the reporter-facing `status`.
-- `src/feedback/diagnostics.ts` redacts browser diagnostics on the server before they are stored: query strings stripped, no location ever, and only permission states rather than values.
-- `src/feedback/faq.ts` tries to answer a question from the FAQ before the report is sent.
-- `src/images/policy.ts` is the upload security boundary. It sniffs the magic number and refuses SVG, which is the rule screenshot uploads need.
-- `src/maps/slug.ts` makes unguessable 22-character base62 public ids.
+- `src/feedback/faq.ts` tries to answer a question from the FAQ before the report is sent. Not part of v1; kept in case it is wanted later.
 
 ### Client side
 
@@ -34,11 +30,10 @@ These import Routeloop's Drizzle `db`, its schema, its config, and its page layo
 - `src/feedback/storage.ts` stores attachments on disk under integer ids, containment-checked so path traversal is structurally impossible.
 - `src/feedback/notify.ts` emails the owner a new report and the reporter a status change, always after the transaction commits, and never throws.
 - `src/routes/feedback.tsx` is the Hono routes for the multi-step intake, the reporter's own list, and the `/admin/feedback` triage queue.
-- `src/images/process.ts` re-encodes every upload to WebP with sharp, stripping anything the decoder did not understand.
 - `src/auth/mailer.ts` is plain SMTP through nodemailer, so changing provider is a `.env` change.
 - `src/emails/` holds the two feedback templates plus the shared shell, types, and theme they render through.
 - `style/_feedback.scss` is styled in Routeloop's highway-sign visual language, so expect to take its layout ideas rather than the CSS itself.
 
 ### Tests
 
-`test/` holds the six tests covering the pure modules above. They run under Vitest.
+`test/` holds the tests for what is left here: the client ring buffer and the FAQ matcher.

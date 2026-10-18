@@ -17,7 +17,7 @@
     "dev": "wrangler dev --port $npm_package_config_port",
     "build:widget": "node utils/build-widget.js",
     "types": "wrangler types",
-    "typecheck": "tsc -p src/widget && tsc -p src/worker && tsc -p test",
+    "typecheck": "tsc -p src/core && tsc -p src/widget && tsc -p src/worker && tsc -p test",
     "test": "vitest run",
     "test:watch": "vitest"
   },
