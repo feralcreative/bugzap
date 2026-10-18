@@ -4,7 +4,7 @@ Brainstorm started 2026-10-17 in Routeloop (`~/www/moto/routeloop`) and moved he
 
 ## Goal
 
-A BugHerd-style feedback tool. A user or client clicks anything on a page, a pin drops there, and a report goes out carrying the URL, the element under the pin, the click point, the viewport, and a screenshot. One tool for Routeloop and every other Feral Creative project.
+A pin-drop feedback tool. A user or client clicks anything on a page, a pin drops there, and a report goes out carrying the URL, the element under the pin, the click point, the viewport, and a screenshot. One tool for Routeloop and every other Feral Creative project.
 
 ## Shape
 
