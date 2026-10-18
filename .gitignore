@@ -1,0 +1,289 @@
+# ============================================================
+# Ziad's boilerplate .gitignore
+# Updated: 20260920T0054Z
+# ------------------------------------------------------------
+# Personal starting point, reused across all of my projects.
+# Intentionally broad: it errs on the side of ignoring too
+# much. Treat it as a baseline, not gospel.
+#
+#/ Judgment call: worth committing in some projects.
+#! Trap: matches more than it looks like.
+#
+# https://feralcreative.dev
+# ============================================================
+
+# --- OS -----------------------------------------------------
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+#! Also matches any five-character name starting with Icon (Icons/)
+Icon?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+*.cab
+*.msi
+*.msm
+*.msp
+
+# --- Editors and AI agents ----------------------------------
+.idea/
+*.swp
+*.swo
+*~
+.sublime-project
+.sublime-workspace
+.history/
+.playwright-mcp
+.augment
+.codex
+_AI_AGENT_PRIMER.md
+.journal*
+JOURNAL.md
+#/ Shared workspace files and Claude project settings/skills
+*.code-workspace
+.claude
+
+# --- Secrets and local config -------------------------------
+.env
+.env.local
+.env.*.local
+*.env
+.secrets
+.private
+.htpasswd
+.htaccess.backup
+wp-config-local.php
+*.kubeconfig
+#/ Often a real, committed config that reads secrets from env
+config.php
+
+# --- Private and archival folders ---------------------------
+_archive
+_private
+_deprecated
+_reference
+_tasks
+_SHAREPOINT
+console.txt
+*.syncthing*
+*.sync-conflict*
+
+#/ --- Design and media sources -------------------------------
+*.psd
+*.psb
+*.psdt
+*.ai
+*.ait
+*.indd
+*.indt
+*.idml
+*.xd
+*.sketch
+*.fig
+*.afdesign
+*.afphoto
+*.afpub
+*.prproj
+*.aep
+*.aet
+*.mp4
+*.mov
+*.mkv
+*.mpeg
+*.mpg
+
+#/ --- Office documents --------------------------------------
+*.doc
+*.docx
+*.dot
+*.dotx
+*.xls
+*.xlsx
+*.xlsm
+*.xlt
+*.xltx
+*.ppt
+*.pptx
+*.pps
+*.ppsx
+*.pot
+*.potx
+*.pages
+*.numbers
+*.key
+*.odt
+*.ods
+*.odp
+*.rtf
+*.pdf
+
+# --- Adobe caches and previews ------------------------------
+*.PRV/
+Adobe Premiere Pro Video Previews/
+Adobe Premiere Pro Audio Previews/
+Adobe Premiere Pro Auto-Save/
+Adobe Premiere Pro Captured Video/
+Adobe After Effects Auto-Save/
+Adobe After Effects Disk Cache*/
+Media Cache/
+Media Cache Files/
+*.cfa
+*.pek
+*.ims
+*.mpgindex
+
+# --- WordPress ----------------------------------------------
+*.wpress
+wp-includes/
+wp-admin/
+wp-content/cache/
+wp-content/languages/
+wp-content/plugins/
+wp-content/ai1wm-backups/*
+**/wp-content/themes/twenty*/
+wp-*.php
+xmlrpc.php
+readme.html
+#/ Outside WordPress: a real license, the entry point, verification files
+license.txt
+/index.php
+.well-known/
+
+# --- Node and JavaScript ------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+.npm
+.eslintcache
+.stylelintcache
+.prettiercache
+*.js.map
+#/ Lockfiles: apps normally commit them, libraries usually do not
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# --- Python -------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+env.bak/
+venv.bak/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+*.egg-info/
+.eggs/
+*.egg
+MANIFEST
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# --- PHP ----------------------------------------------------
+composer.phar
+#/ Go projects vendor on purpose
+vendor/
+
+#/ --- Compiled styles (hand-written CSS in a no-Sass project) --
+*.css
+*.min.css
+*.css.map
+
+# --- Build output -------------------------------------------
+out-tsc/
+bazel-out/
+tmp/
+.angular/
+.next/
+.nuxt/
+.output/
+.svelte-kit/
+.vite/
+storybook-static/
+docs/_build/
+#/ Published builds (GitHub Pages, libraries) or plain source dirs
+dist/
+build/
+out/
+lib/
+site/
+
+# --- Caches -------------------------------------------------
+.cache/
+*.cache
+.parcel-cache/
+.sass-cache/
+
+# --- Tests and coverage -------------------------------------
+coverage/
+.nyc_output/
+test-results/
+test-results.xml
+playwright-report/
+junit.xml
+
+# --- Deployment and containers ------------------------------
+.vercel/
+.netlify/
+.firebase/
+.surge/
+.serverless/
+serverless.yml.bak
+docker-compose.override.yml
+.docker/
+#/ Usually committed
+.dockerignore
+Dockerfile.dev
+
+#/ --- Databases (schemas, migrations, fixtures) ---------------
+*.sql
+*.sqlite
+*.sqlite3
+*.db
+
+# --- Logs, temp, and backups --------------------------------
+*.log
+*.tmp
+*.temp
+*.pid
+*.pid.lock
+*.seed
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*.sh~
+*.bash_history
+~$*
+.~lock.*#
+
+#/ --- Archives (release assets) -------------------------------
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# ============================================================
+# END Ziad's boilerplate .gitignore
+# ============================================================
