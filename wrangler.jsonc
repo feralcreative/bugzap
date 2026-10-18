@@ -1,0 +1,45 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bugzap",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-10-01",
+
+  // The widget bundle (dist/assets/v1/bugzap.js) is served as a static asset.
+  // Anything that is not a file falls through to the Worker.
+  "assets": {
+    "directory": "./dist/assets",
+    "binding": "ASSETS"
+  },
+
+  // Rebuilds the widget before every `wrangler dev` reload, and on save under src/widget.
+  "build": {
+    "command": "node utils/build-widget.js",
+    "watch_dir": "src/widget"
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bugzap",
+      // Placeholder until the remote database is created (milestone 8). Local dev ignores it.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "SHOTS",
+      "bucket_name": "bugzap-shots"
+    }
+  ],
+
+  "vars": {
+    // console prints mail to the terminal; cloudflare sends it (needs a sending domain).
+    "MAIL_MODE": "console"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}

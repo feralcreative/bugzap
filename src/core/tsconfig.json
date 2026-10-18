@@ -1,0 +1,10 @@
+{
+  // Pure logic shared by the widget and the Worker: no DOM, no Workers APIs.
+  // Web Crypto and the other globals both runtimes have are declared by lib ES2022 + DOM-free types.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": []
+  },
+  "include": ["."]
+}

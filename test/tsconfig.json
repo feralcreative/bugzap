@@ -1,0 +1,12 @@
+{
+  // Tests are type-checked too: Vitest transpiles without checking, so fixtures
+  // could drift from the types they claim to be and nothing else would notice.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["@cloudflare/vitest-plugin/types"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx"
+  },
+  "include": [".", "../src/core", "../worker-configuration.d.ts"]
+}

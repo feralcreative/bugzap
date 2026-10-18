@@ -1,0 +1,40 @@
+{
+  "name": "bugzap",
+  "version": "0.1.0",
+  "private": true,
+  "license": "FSL-1.1-ALv2",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "config": {
+    "port": "2833",
+    "demoPort": "2834"
+  },
+  "scripts": {
+    "start": "trap 'kill 0' INT TERM EXIT; node utils/open-when-ready.js & node utils/demo-server.js & npm run dev",
+    "start:no-open": "OPEN_BROWSER=0 npm start",
+    "dev": "wrangler dev --port $npm_package_config_port",
+    "build:widget": "node utils/build-widget.js",
+    "types": "wrangler types",
+    "typecheck": "tsc -p src/widget && tsc -p src/worker && tsc -p test",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "hono": "^4.13.13"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.4",
+    "esbuild": "^0.28.2",
+    "happy-dom": "^21.0.3",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.151.1"
+  },
+  "allowScripts": {
+    "esbuild": true,
+    "workerd": true,
+    "fsevents": true
+  }
+}

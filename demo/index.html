@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bugzap demo host</title>
+  <style>
+    body { font: 16px/1.5 system-ui, sans-serif; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; color: #222; background: #fafafa; }
+    .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    p { text-wrap: pretty; }
+  </style>
+</head>
+<body>
+  <h1>Bugzap demo host</h1>
+  <p>A stand-in for a site that embeds Bugzap. It runs on its own origin so the widget talks to the Worker cross-origin, the same way it will on a real&nbsp;site.</p>
+  <div class="card" data-bugzap-id="pricing">
+    <h2>Pricing</h2>
+    <p>Free for one site, paid plans for&nbsp;more.</p>
+    <button type="button">Choose a plan</button>
+  </div>
+  <div class="card">
+    <h2>No stable anchor</h2>
+    <p>This card has no data attribute, so a pin here falls back to a selector and the click&nbsp;point.</p>
+  </div>
+
+  <script>
+    window.Bugzap = window.Bugzap || function () { (Bugzap.q = Bugzap.q || []).push(arguments); };
+    Bugzap("init", { site: "bz_pk_demo" });
+  </script>
+  <script async src="{{BUGZAP_ORIGIN}}/v1/bugzap.js"></script>
+</body>
+</html>
