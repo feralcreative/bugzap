@@ -8,13 +8,15 @@ A pin-drop feedback tool. A user or client clicks anything on a page, a pin drop
 
 ## Shape
 
-Proposed 2026-10-17, not yet decided.
+Decided 2026-10-18. The full build plan, with the schema, the APIs, and eight milestones (issues #1–#8), is [_PLANS/v1-build-plan.md](../_PLANS/v1-build-plan.md).
 
-- **An embeddable, framework-free script** that drops the pin, takes the screenshot, and posts one JSON payload to an endpoint the host site configures. It runs in a shadow DOM so it cannot clash with any host's CSS.
-- **A small hosted backend** (collector, dashboard, per-site keys, and screenshot storage) for projects with nothing of their own.
-- **Routeloop points the script at its own `/feedback` intake** and keeps its queue, private-bug rule, status emails, and diagnostics (`public/js/feedback-buffer.js` there).
-
-Standalone is roughly two or three sprints, against about one to build it inside Routeloop, because accounts, the queue, mail, storage, and the dashboard come free there and must be rebuilt here.
+- **An embeddable, framework-free script** that drops the pin, takes the screenshot, and posts the report to the hosted backend. It runs in a shadow DOM so it cannot clash with any host's CSS.
+- **A hosted backend on Cloudflare Workers**: D1 for data, R2 for screenshots, the widget served as a static asset, and an owner dashboard rendered by the same Worker. v1 ships the widget and the backend together.
+- **Reporters are identified by the host site**, which signs an HS256 token over the user's id, email, and name with a per-site secret. Sites with no login of their own cannot use v1.
+- **Screenshots are automatic DOM capture** (modern-screenshot), cropped around the pin, with a file upload when the capture comes out blank.
+- **Routeloop moves to the hosted backend** like any other site, rather than keeping its own `/feedback` intake.
+- **Report kinds are bug, idea, and question**, as in Routeloop.
+- **Multi-tenant from the start** (accounts, sites, reports) so it can become a freemium product under FSL-1.1-ALv2, but billing is not in v1.
 
 ## What Routeloop already has to borrow from
 
@@ -35,8 +37,9 @@ Rejected: client-feedback vocabulary (redline, markup, punchlist, and so on) and
 
 ## Open questions
 
-- Domain: bugzap.app or bugzap.io.
-- Where the hosted backend runs: the Synology NAS (the personal-project default) or Cloudflare Workers.
-- Screenshot method: a DOM-to-image library (a dependency), `getDisplayMedia`, or none.
-- Whether reporters on other projects are anonymous, or identified by the host site.
-- Who sees pins after they are dropped: only the site owner, or the reporter as well.
+- Domain: bugzap.app or bugzap.io. v1 runs on `workers.dev` until then, and the email sending domain waits on the same decision, since both are DNS changes.
+- Screenshot retention: proposed as an R2 lifecycle rule at 180 days.
+- Query strings: proposed as stripped by default, with a per-site list of parameters to keep.
+- Sites with no login of their own: proposed as reviewer invites over a magic link, after v1.
+
+Settled 2026-10-18: hosting (Cloudflare Workers), screenshots (DOM capture with upload fallback), reporters (host-identified), and who sees pins (the reporter sees their own, the owner sees all of them through the dashboard).
