@@ -1,0 +1,31 @@
+{
+  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  // Starts from Routeloop's tuned config (.qlty/configs/biome.jsonc there), which cut
+  // biome's defaults from 242 findings to the ones that were defects. Everything
+  // turned off below is a style preference.
+  // Prettier owns formatting, against .prettierrc. Biome ships its own formatter and
+  // disagrees with prettier on details, so with both on every file is permanently
+  // "unformatted" according to one of them. Biome is here for the linter only.
+  "formatter": { "enabled": false },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "style": {
+        "useTemplate": "off",
+        "useSelfClosingElements": "off",
+        "noNonNullAssertion": "off"
+      },
+      "complexity": {
+        "noForEach": "off",
+        "useArrowFunction": "off",
+        "useOptionalChain": "off"
+      },
+      "correctness": {
+        // A React reconciliation concern. The dashboard is Hono JSX rendered to a
+        // string once, server-side; there is nothing to reconcile.
+        "useJsxKeyInIterable": "off"
+      }
+    }
+  }
+}
