@@ -6,4 +6,4 @@ Built for Routeloop and every other Feral Creative project: a small embeddable s
 
 ## Status
 
-Planning. Nothing is built yet. The plan, the known traps, and the open questions are in [docs/ROADMAP.md](docs/ROADMAP.md).
+Planning. Nothing is built yet. The plan, the known traps, and the open questions are in [docs/ROADMAP.md](docs/ROADMAP.md). Code being borrowed from other projects is in [reference/](reference/README.md), which is read-only source material and is never run.

@@ -18,7 +18,7 @@ Standalone is roughly two or three sprints, against about one to build it inside
 
 ## What Routeloop already has to borrow from
 
-Routeloop's feedback subsystem is the reference implementation for the intake side: `src/feedback/` (policy, service, notify, diagnostics, and storage), `src/routes/feedback.tsx` (the form, `/feedback/mine`, and the `/admin/feedback` queue), and `public/js/feedback-buffer.js` (an error and network ring buffer that cannot itself crash). Its rules worth keeping: a bug report is private to its author and the owner until published, attachment bytes count against nobody's quota, and diagnostics never include a location.
+Routeloop's feedback subsystem is the reference implementation for the intake side, and it was copied into [reference/routeloop/](../reference/routeloop/) on 2026-10-18. [reference/README.md](../reference/README.md) indexes every file and says which ones are portable and which are coupled to Routeloop. Its rules worth keeping: a bug report is private to its author and the owner until published, attachment bytes count against nobody's quota, and diagnostics never include a location.
 
 ## Known traps
 

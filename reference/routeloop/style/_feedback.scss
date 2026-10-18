@@ -1,0 +1,1198 @@
+@use "tokens" as *;
+@use "chrome";
+
+// The rider feedback flow: intake, "what you've sent", and the floating way in.
+//
+// **This surface is pinned to light values and stays that way.** A dark UI on a
+// phone screen in direct sunlight is close to unreadable, and this flow is used
+// outdoors more than any other screen in the app. Decided 2026-08-16. When a dark
+// theme arrives, `.feedback-flow` is the surface it must skip, and there is no
+// `prefers-color-scheme` block below on purpose.
+//
+// The sizing is not the house scale, also on purpose — every target here is
+// bigger, because the hands using it are gloved. WCAG 2.2 AA floors a target at
+// 24px and AAA at 44px; a gloved thumb needs more, so tap targets are 56–60px
+// with 12–16px between them, body text is 17px minimum, and contrast targets 7:1.
+//
+// **No thin or light font weights in this flow** — they smear in glare, which is
+// the exact condition it is designed for.
+
+@use "palette";
+
+$fb-tap: 60px;
+$fb-gap: 16px;
+$fb-radius: 12px;
+
+// PINNED FOR REAL AS OF 2026-08-24, when the dark theme the header anticipated
+// actually arrived. These were `$white` and `$neutral-21`, which read as pinned
+// and were not: every token became a `var()` reference that afternoon, so an
+// alias would have followed the scheme into dark like everything else and this
+// flow would have gone dark in sunlight without a single line changing here.
+//
+// `palette.light()` reads the DEFAULT LIGHT value of a token directly out of the
+// palette, bypassing the custom property. It exists for this surface and has no
+// other caller.
+$fb-bg: palette.light("white");
+$fb-ink: palette.light("neutral-21");
+// $neutral-43 on white is about 6.4:1 — short of the 7:1 target, so helper text
+// uses the body ink at a smaller size instead of a lighter gray. That is the
+// "no gray-on-gray" rule in practice.
+$fb-line: palette.light("neutral-88");
+
+.feedback-flow {
+  background: $fb-bg;
+  color: $fb-ink;
+
+  h1 {
+    margin: 0 0 0.4em;
+    font-size: 1.6rem;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+}
+
+.fb-flow,
+// SCREEN ONE IS THREE SIGNS AND NOTHING ELSE, so they take the height rather
+// than sitting in the top third of it. Ziad's call, 2026-09-07.
+//
+// A GAP THAT GROWS WITH THE VIEWPORT AND IS CLAMPED AT BOTH ENDS. `clamp` rather
+// than a plain `vh`, because this flow's own sizing rules are a floor and not a
+// suggestion: 16px is the minimum this file documents between adjacent targets
+// for a gloved thumb, and a bare `4vh` would fall under it on a phone in
+// landscape — which is exactly the posture somebody reporting a bug at the side
+// of a road is in. The ceiling is there because three signs a screen apart stop
+// reading as one set of choices.
+.fb-fork {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(#{$fb-gap}, 4vh, 2.25rem);
+  max-width: 34rem;
+  // AIR UNDER THE HEADING, and it scales with the viewport like the gap does so
+  // the two stay in proportion — a fixed rule under a growing gap makes the
+  // heading look stuck to the first sign on a tall screen. Slightly more than
+  // the gap at every size, so the question reads as the question and the three
+  // signs read as the answer to it.
+  //
+  // ON THE FORK RATHER THAN ON `.feedback-flow h1`, which is every screen in the
+  // flow. The later ones put a lede directly under the heading, and pushing that
+  // down would read as the sentence having come loose from what it explains.
+  margin: clamp(1.5rem, 5vh, 3rem) auto 0;
+  padding: 0 0 6rem; // room for the bottom-anchored send button
+}
+
+// --- Screen 1: the fork ------------------------------------------------------
+
+// THE THREE CARDS ARE SIGNS, AND THEY READ DOWN THE PAGE AS A SIGNAL.
+// Ziad's call, 2026-09-07: red, then yellow, then green. It falls out of what
+// the three actually mean — something is broken is a stop condition, an idea is
+// a suggestion to go a different way, and a question is nobody being held up at
+// all — so the order in KIND_ORDER and the order of the colors are the same
+// order for the same reason, rather than a palette applied down a list.
+//
+// PINNED TO THE LIGHT PALETTE like everything else on this surface, via
+// palette.light(). The note at the top of this file is why: these values must
+// not follow the scheme, or the flow goes dark in sunlight. It also means each
+// pair below has ONE contrast ratio rather than six.
+$fb-stop: palette.light("stop");
+$fb-yield: palette.light("yield");
+$fb-go: palette.light("interstate");
+// The two legend inks, and they are not interchangeable — see the ink-pairing
+// table in _palette.scss. $stop and $interstate are white-legend fields;
+// $yield is the yellow of a yield sign and takes BLACK, which is not a stylistic
+// choice — white on it measures about 1.3:1 and is effectively invisible. The
+// keyline goes black with it, the same way `.btn-warning` carries a dark ring.
+$fb-legend-light: palette.light("ink-light");
+$fb-legend-dark: palette.light("ink-dark");
+
+// The guide sign's own construction, at card scale: the field, the legend, and
+// a keyline set in from the edge so a band of field still shows outside it.
+//
+// TWO STACKED INSET SHADOWS, not a border — the first repaints the outer 3px in
+// the field color and the second would fill the outer 5px in the ink, so what
+// survives is a 2px ring inset by 3px. Inset shadows follow the border-radius,
+// so the inner corners curve on their own. Same mechanism and same numbers as
+// `sign-field()` in _chrome.scss; not that mixin, because it also sets a
+// button's padding, its gap and its arrow, and a card is none of those.
+@mixin fb-sign($field, $ink) {
+  background: $field;
+  color: $ink;
+  border-color: $field;
+  box-shadow:
+    inset 0 0 0 3px $field,
+    inset 0 0 0 5px $ink;
+
+  // Lit differently, not a different sign. Both layers move together, or the
+  // old field shows as a hairline outside the keyline.
+  &:hover,
+  &:focus-visible {
+    $lit: color-mix(in oklab, #{$field}, black 12%);
+
+    background: $lit;
+    border-color: $lit;
+    box-shadow:
+      inset 0 0 0 3px $lit,
+      inset 0 0 0 5px $ink;
+  }
+}
+
+// THE ARROW, IN THE LEGEND'S OWN INK.
+//
+// A MASK RATHER THAN A BAKED FILL, and it is not a preference: the base
+// `sign-arrow` bakes `%23fff` into its data URI, which is only correct because
+// every sign it draws takes a white legend. The yellow card is the variant that
+// does not — its legend is black, so a white arrow on it would be invisible. A
+// mask painted with `currentColor` follows whichever ink the sign carries, so
+// one declaration serves all three and cannot drift out of step with the text
+// beside it. This file carried the mask as a second literal copy of the path
+// until 2026-09-20, when the splash's yield sign needed the same thing;
+// `sign-arrow($ink)` in _chrome.scss draws it now, from the one path.
+//
+// The drawing alone, because the arrow here is placed by its grid cell and not
+// by a flex line with a padded legend, so the base mixin's nudge means nothing.
+@mixin fb-arrow {
+  @include chrome.sign-arrow-drawing(currentColor);
+
+  // Doubled from 1.6rem on 2026-09-07. At sign scale the arrow is a second
+  // legend rather than a decoration on the end of one.
+  width: 3.2rem;
+  height: 3.2rem;
+}
+
+// GRID RATHER THAN A FLEX COLUMN, so the arrow can sit at the right of BOTH text
+// rows without the two spans needing a wrapper element around them in the
+// markup. The text rows stack in column one, the arrow spans them in column two.
+//
+// `align-content: center` is what centers the text block top to bottom inside
+// the card's 7rem — Ziad's call, 2026-09-07. It is the ROW GROUP being centered,
+// which is the thing that reads as centered; `align-items` alone would center
+// each row in its own track and leave the pair sitting at the top.
+.fb-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "label arrow"
+    "blurb arrow";
+  align-content: center;
+  align-items: center;
+  gap: 0.25em 1rem;
+  // The minimum is well past the 60px the rest of the flow uses. These three
+  // cards are the whole of screen one and there is nothing to crowd, and as
+  // SIGNS they want the height — a guide sign that is mostly keyline reads as a
+  // badge. Raised from 88px on 2026-09-07 with the gap above.
+  min-height: 7rem;
+  // A PREDICTABLE `em` FIRST. A <button> takes the UA's own font-size as well as
+  // its font-face, so before this line the padding below resolved against
+  // 13.33px rather than the page's 16 — the box was right by accident and the
+  // next person to change a number here would have got three quarters of what
+  // they asked for. The label and blurb set their own rem sizes, so this
+  // changes nothing that is drawn.
+  font-size: 1rem;
+  // Looser than it was, because the legend now has a keyline to clear — the
+  // same reason `.btn-sign` is padded wider than `.btn`. The horizontal figure
+  // doubled on 2026-09-07: a guide sign is mostly field, and legend set close to
+  // the keyline reads as a label stuck on a colored box.
+  padding: 0.95rem 2.35rem;
+  border: 2px solid $fb-line;
+  border-radius: $fb-radius;
+  background: $fb-bg;
+  color: $fb-ink;
+  text-align: left;
+  cursor: pointer;
+
+  // The unsigned card is still what an unknown kind renders as, so the plain
+  // hover stays underneath the three below.
+  &:hover,
+  &:focus-visible {
+    border-color: $brand;
+  }
+
+  // ON THE SIGNED CARDS ONLY. An arrow is a LEGEND, and a card with no field is
+  // not a sign for it to be a legend on.
+  &[data-kind]::after {
+    @include fb-arrow;
+
+    grid-area: arrow;
+  }
+
+  &[data-kind="bug"] {
+    @include fb-sign($fb-stop, $fb-legend-light);
+  }
+
+  &[data-kind="idea"] {
+    @include fb-sign($fb-yield, $fb-legend-dark);
+  }
+
+  &[data-kind="question"] {
+    @include fb-sign($fb-go, $fb-legend-light);
+  }
+}
+
+.fb-card-label {
+  grid-area: label;
+  // Up from 1.25rem on 2026-09-07. It is the legend of a sign now rather than
+  // the title of a card, and a sign's legend is the thing you read from a
+  // distance — the blurb under it is the sentence you read once you have.
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.fb-card-blurb {
+  grid-area: blurb;
+  font-size: 1.0625rem; // 17px floor
+  font-weight: 400;
+}
+
+// The escape hatch. Never let the fork be the abandonment point — someone who
+// cannot classify their own problem still has the problem.
+.fb-escape {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  margin: 0.5em 0 0;
+  font-size: 1.0625rem;
+
+  // It inherited `.linkbtn` and with it the app's sizing, which put it at
+  // 144x26 on a screen where the three cards are 348x95 and every other target
+  // in the flow is 44px or more. It is the control a rider reaches for when
+  // none of the three big ones fit, so it gets the flow's sizing like
+  // everything else here. See the note at the top of this file.
+  .linkbtn {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 0.5em;
+  }
+}
+
+// --- The typed field ---------------------------------------------------------
+
+.fb-body {
+  width: 100%;
+  padding: 0.75em;
+  border: 2px solid $fb-line;
+  border-radius: $fb-radius;
+  background: $fb-bg;
+  color: $fb-ink;
+  font-family: inherit;
+  font-size: 1.0625rem;
+  font-weight: 400;
+  line-height: 1.45;
+
+  &:focus-visible {
+    border-color: $brand;
+    outline: none;
+  }
+}
+
+.fb-help {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 400;
+  color: $fb-ink;
+}
+
+// The example that a placeholder would have carried. Persistent, because
+// placeholder text vanishes on focus and measurably raises error rates.
+.fb-example {
+  margin: 0;
+  font-size: 1rem;
+  font-style: italic;
+  color: $fb-ink;
+}
+
+.fb-error {
+  margin: 0;
+  padding: 0.6em 0.8em;
+  border-left: 4px solid $stop;
+  background: color-mix(in srgb, $stop 8%, $white);
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+// --- Chips -------------------------------------------------------------------
+
+// Chips, never a <select>. A native select on iOS opens a wheel picker with
+// roughly 34px rows, which is not operable with gloves on.
+.fb-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.fb-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 56px;
+  padding: 0 1.1em;
+  border: 2px solid $fb-line;
+  border-radius: $fb-radius;
+  background: $fb-bg;
+  font-size: 1.0625rem;
+  font-weight: 500;
+  cursor: pointer;
+
+  // The radio still exists and still owns the keyboard, the grouping and the
+  // ARIA — it is only visually removed. Never replace it with a div.
+  input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+  }
+
+  &:hover {
+    border-color: $brand;
+  }
+
+  // Both, because the class is set by feedback.js and :has covers the case
+  // where it never loaded.
+  &.is-on,
+  &:has(input:checked) {
+    border-color: $brand;
+    background: color-mix(in srgb, $brand 10%, $white);
+    font-weight: 600;
+  }
+
+  &:focus-within {
+    outline: 3px solid $brand;
+    outline-offset: 2px;
+  }
+}
+
+// --- Actions -----------------------------------------------------------------
+
+.fb-actions {
+  display: flex;
+  align-items: center;
+  gap: $fb-gap;
+  margin: 0;
+}
+
+.fb-send,
+.fb-next {
+  min-height: $fb-tap;
+  padding: 0 1.5em;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+// Full-width and bottom-anchored, above the keyboard. `sticky` rather than
+// `fixed` so it scrolls with the form on a desktop and pins on a phone, and
+// `env(safe-area-inset-bottom)` keeps it clear of the home indicator.
+.fb-flow .fb-send {
+  position: sticky;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  flex: 1;
+  width: 100%;
+}
+
+// STICKY ON EVERY SCREEN, not only the last one. Measured at 393x852 with a
+// 336px keyboard up — a 516px visual viewport — the first screen's Next sat
+// 114px below the fold, which is the failure this flow's own plan predicted.
+// `.fb-send` above already made the bet that a sticky bottom control is the
+// right answer here; this extends that bet to the screens before it rather
+// than introducing a different one.
+//
+// :has() so the last screen is left alone. `.fb-send` is itself sticky, and a
+// sticky box inside a sticky box resolves against the wrong containing block —
+// the row would pin and the button inside it would then never move.
+//
+// The background is not decoration. Without it the help text and the details
+// disclosure scroll under a transparent row and both are readable at once.
+.fb-flow .fb-actions:not(:has(.fb-send)) {
+  position: sticky;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  padding: 12px 0;
+  background: $fb-bg;
+}
+
+// "Send it now" on a screen that is not the last. Deliberately quieter than
+// Next but never hidden — it is what makes every screen after the first
+// optional, which is the highest-leverage decision in the flow.
+.fb-send-now {
+  min-height: $fb-tap;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.fb-file {
+  min-height: $fb-tap;
+  width: 100%;
+  padding: 0.75em;
+  border: 2px dashed $fb-line;
+  border-radius: $fb-radius;
+  font-size: 1.0625rem;
+}
+
+.fb-confirm {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 400;
+}
+
+// --- The FAQ strip -----------------------------------------------------------
+
+.fb-faq {
+  padding: 0.8em 1em;
+  border-radius: $fb-radius;
+  background: $neutral-96;
+
+  ul {
+    margin: 0.4em 0 0;
+    padding-left: 1.2em;
+  }
+
+  li + li {
+    margin-top: 0.4em;
+  }
+
+  a {
+    font-size: 1.0625rem;
+    font-weight: 500;
+  }
+}
+
+.fb-faq-head {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+// --- The diagnostics note ----------------------------------------------------
+
+.fb-diag {
+  font-size: 1rem;
+
+  summary {
+    cursor: pointer;
+    line-height: 1.4;
+  }
+
+  ul {
+    margin: 0.6em 0;
+    padding-left: 1.2em;
+  }
+}
+
+// --- Confirmation and the rider's own list -----------------------------------
+
+.fb-ref {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.fb-after {
+  margin-top: 1.5em;
+}
+
+.fb-list {
+  margin: 1em 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fb-item {
+  padding: 1em 0;
+  border-top: 1px solid $fb-line;
+}
+
+.fb-item-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1em;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.fb-item-title {
+  margin: 0.3em 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.fb-kind {
+  &.is-bug {
+    color: $stop;
+  }
+
+  &.is-idea {
+    color: $go;
+  }
+
+  &.is-question {
+    color: $brand;
+  }
+}
+
+.fb-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+  align-items: baseline;
+
+  strong {
+    font-size: 1.0625rem;
+  }
+}
+
+.fb-status-sub {
+  font-size: 1rem;
+}
+
+.fb-response {
+  margin: 0.6em 0 0;
+  padding: 0.6em 0.9em;
+  border-left: 4px solid $brand;
+  background: $neutral-96;
+  font-size: 1.0625rem;
+}
+
+.fb-said {
+  white-space: pre-wrap;
+  font-size: 1.0625rem;
+  line-height: 1.5;
+}
+
+.fb-wants,
+.fb-when {
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.fb-shots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+
+  img {
+    max-width: 100%;
+    border: 1px solid $fb-line;
+    border-radius: 8px;
+  }
+}
+
+// --- The floating way in -----------------------------------------------------
+
+// On the builder and the viewer only, and a plain <a> rather than a scripted
+// overlay: it has to work when the page around it is the thing that is broken.
+//
+// **It is inset from the right edge, not tucked into the corner, and that is
+// measured rather than taste.** Google stacks its controls in a column down the
+// right edge, so anything anchored to that corner sits on one. Clearing the
+// column horizontally is what works; clearing it vertically does not, because the
+// column is most of the edge.
+//
+// **RE-MEASURED 2026-08-29 FOR #173**, which scaled Google's controls to 0.7.
+// Stated as offsets from the right edge rather than absolute x: Google anchors
+// the bundle at `right: 40px` with a 10px margin, so the column now runs 22–50px
+// in. The dock is `right: 72px` and 56px wide, so the 22px of daylight between
+// them is unchanged by the scale.
+// THE PAIR. Reporting something broken and reading what changed are different
+// errands, so they are two marks rather than one control with a menu.
+//
+// The help launcher is the support-widget shape — Intercom, Zendesk, Crisp —
+// chosen because a tester recognizes it before they read anything. Ziad's call,
+// 2026-08-23.
+//
+// The DOCK is what is positioned; the launcher and the menu are laid out against
+// it. Before this the buttons were positioned individually and every responsive
+// rule moved them.
+.fab-dock {
+  position: fixed;
+  // A plain corner inset. `right: 72px` was clearing the map's control column,
+  // which is a map's problem and not every page's — that offset moved to the
+  // .map-page rule below, where the thing it dodges actually exists.
+  right: calc(env(safe-area-inset-right, 0px) + 24px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
+  z-index: $z-fab;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.6rem;
+}
+
+// Not on the flow itself. The bug item opens the page it would be sitting on,
+// and that flow is built around a sticky full-width control at the bottom edge —
+// which is also WCAG 2.2 SC 2.4.11 (Focus Not Obscured), the rule that says a
+// fixed element must not hide the control a rider has just focused.
+//
+// Ziad's call to make: this is the single page the "on every page" rule of
+// 2026-08-23 is deliberately not applied to. Delete these three lines to apply
+// it there too.
+.feedback-flow .fab-dock {
+  display: none;
+}
+
+// Over a map the dock still has to clear the zoom and basemap controls down the
+// right edge, which is what the old unconditional 72px was for.
+//
+// AND THE TIMELINE, AT EVERY WIDTH. The bar runs out to --map-control-gutter and
+// the dock sits 72px in from the same edge, so the two overlapped by about 45px —
+// landing the shield on the last of the slider's travel, which is the end of the
+// ride and the part hardest to grab back. Reported as #221; it was never caught
+// because the ≤767px block has cleared the bar since the sheet layout landed.
+//
+// --fb-fab-timeline-clear is 0px until the bar is actually on screen, so a ride
+// with no dates gets the base number exactly. :has() rather than a class, so
+// nothing has to remember to keep the two in step.
+//
+// The phone block redeclares BOTH the variable and `bottom`, later in the file,
+// so this is a base it overrides. Note it declares the variable WITHOUT
+// --panel-inset — keep the two spellings distinct if you touch either.
+html.map-page {
+  --fb-fab-timeline-clear: 0px;
+}
+
+html.map-page:has(.map-timeline:not([hidden])) {
+  --fb-fab-timeline-clear: calc(var(--panel-inset) + var(--timeline-height));
+}
+
+.map-page .fab-dock {
+  right: calc(env(safe-area-inset-right, 0px) + 72px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 32px + var(--fb-fab-timeline-clear));
+  // Rides with the bar rather than jumping when a rider types the first date.
+  // Same duration and easing as the drawer slide in _map.scss and as the phone
+  // rule below; keep the three in step.
+  transition: bottom 0.34s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.fab-launcher {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  // 56px rather than the 44px the marks used to be. A launcher is one target
+  // instead of two and it is the only way in, so it takes the size the support
+  // widgets use — comfortably past the 44px of WCAG 2.5.5, which the flow behind
+  // it is built to throughout. See the note at the top of this file about gloves.
+  width: 56px;
+  // The shield is 385x401, so it is NOT square. Height follows the artwork
+  // rather than being forced to match the width, which would squash it.
+  height: 58px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: $interstate;
+  cursor: pointer;
+  // drop-shadow, not box-shadow, and this is the whole reason it is worth a
+  // comment: box-shadow traces the BORDER BOX, so a shield would sit inside a
+  // rounded rectangle of shadow with daylight in the shoulders. A filter follows
+  // the alpha of what is actually painted, so the shadow is shield-shaped.
+  filter: drop-shadow(0 3px 8px $panel-shadow);
+  transition: filter 0.18s ease;
+
+  svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  // Lifts rather than lightens. It sits over a map whose color underneath is
+  // unknown, so a hover that changed the fill would read differently on terrain
+  // than on satellite; a shadow reads the same over both.
+  &:hover {
+    filter: drop-shadow(0 5px 12px $panel-shadow);
+  }
+
+  &:focus-visible {
+    outline: 2px solid $accent;
+    outline-offset: 3px;
+    // The outline traces the border box, so on a non-rectangular mark it needs a
+    // shape to sit on or it reads as a stray box around nothing.
+    border-radius: 6px;
+  }
+}
+
+// The launcher carries both marks and swaps them, rather than the menu carrying
+// its own close button: one control that toggles is what the pattern trained
+// everyone to expect, and it keeps the target in the same place through the
+// whole interaction.
+.fab-launcher-close {
+  display: none;
+}
+
+// Closing swaps the shield for a plain disc. Two different silhouettes for two
+// states is deliberate: the shield is the app's mark and means "the way in",
+// where the X is a generic control and means "put this away".
+.fab-dock.is-open .fab-launcher {
+  color: $neutral-36;
+  // The X is a disc, so the shield's shape-following shadow would look wrong
+  // under it — and a disc's box-shadow is exact.
+  filter: none;
+  box-shadow: 0 3px 12px $panel-shadow;
+  border-radius: 50%;
+  // Square again, because the disc is.
+  height: 56px;
+
+  .fab-launcher-open {
+    display: none;
+  }
+
+  .fab-launcher-close {
+    display: block;
+    // icon-close.svg is a bare X with no disc behind it, unlike every other mark
+    // here — so this one needs the field the others carry inside the artwork.
+    //
+    // Both values are named. `background: currentColor` was the obvious way to
+    // pick up the launcher's own color and it painted a white disc on a white X:
+    // the `color` below is what currentColor resolves against, and it is set in
+    // this same rule, so the field and the glyph came out the same value.
+    padding: 17px;
+    border-radius: 50%;
+    background: $neutral-36;
+    color: $white;
+  }
+}
+
+// UNREAD. Shown by site.js only when this build is one the rider has not opened
+// the notes for, so it is information rather than an ornament: after they read
+// them it is gone until the next deploy. Empty on purpose — the launcher's own
+// aria-label is what gets announced, and a dot that also spoke would say the
+// destination twice.
+.fab-badge {
+  box-sizing: border-box;
+  position: absolute;
+  // Sat at the border box's top-right corner, which on a shield is empty air —
+  // the mark tapers to a point up there, so the dot read as detached from it.
+  // These put it on the right SHOULDER, where the silhouette is actually widest.
+  top: 9px;
+  right: -1px;
+  width: 14px;
+  height: 14px;
+  border: 2px solid $white;
+  border-radius: 50%;
+  background: $stop;
+}
+
+.fab-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 15rem;
+  padding: 6px;
+  border-radius: 14px;
+  background: $panel-bg;
+  box-shadow: 0 6px 24px $panel-shadow;
+  // The map shows through the 0.9 alpha above; without this it reads as a
+  // grubby pane rather than a floating one.
+  backdrop-filter: blur(8px);
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.fab-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  // 48px, because this is a menu row rather than the flow's primary control —
+  // still past the 44px of WCAG 2.5.5 and comfortably past 2.2's 24px floor.
+  min-height: 48px;
+  padding: 0 0.75rem 0 0.6rem;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: $text;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+
+  // Safe to tint, unlike the launcher: the menu paints its own surface between
+  // this row and whatever is behind the dock, so what is underneath is known.
+  &:hover {
+    background: rgba(0, 0, 0, 0.06);
+  }
+
+  &:focus-visible {
+    outline: 2px solid $accent;
+    outline-offset: -2px;
+  }
+}
+
+.fab-item-mark {
+  display: block;
+  flex: none;
+  width: 26px;
+  height: 26px;
+
+  svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+}
+
+.fab-item-mark--bug {
+  color: $stop;
+}
+
+// GUIDE-SIGN GREEN, WHICH IS $interstate AND NOT $go. These marks are a field in
+// currentColor with the glyph knocked out in WHITE, so the field has to carry a
+// white legend — $go is the traffic signal, takes black ink, and sits at 3.8:1
+// behind white. $interstate is the green a guide sign is painted, clears 4.5:1,
+// and is already what .fab-launcher paints the shield.
+//
+// Still not a second alarm-colored disc: one red mark in a two-item menu is what
+// makes the bug easy to find. Green against red is also the pair dichromacy
+// flattens, so the distinction is carried by two glyphs and two labels.
+.fab-item-mark--notes {
+  color: $interstate;
+}
+
+.fab-item-label {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+// The build, where a rider is already looking for it. Not a title attribute:
+// a tooltip is unreachable by touch, which is most of them.
+.fab-item-sub {
+  color: $neutral-50;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+//@ SM ≤600px — the menu stops being a fixed 15rem and fits the screen instead.
+//  The launcher itself does not shrink: it is the only way in, and a phone is
+//  where the gloves are.
+@media (max-width: 600px) {
+  .fab-menu {
+    min-width: 0;
+    width: max-content;
+    max-width: calc(100vw - 3rem);
+  }
+}
+
+//@ SM ≤767px — the button rides above the sheet rather than over it.
+//
+// This is where #info-panel stops being a left drawer and becomes a full-width
+// sheet, which is the moment `right: 72px` stops keeping the two apart. Measured
+// on /builder/9 before this rule existed: at 393x852 the button sat on a stop's
+// duration field, and at 700x900 it covered a name and duration together.
+//
+// The sheet's own height is read from --sheet-height rather than repeated. The
+// timeline gets a term of its own because it has already claimed the band over
+// the sheet on a dated ride; without dates it is [hidden] and the term collapses.
+@media (max-width: 767px) {
+  html.map-page {
+    --fb-fab-clear: var(--sheet-collapsed-height);
+    --fb-fab-timeline-clear: 0px;
+  }
+
+  html.map-page:has(#info-panel:not(.collapsed)) {
+    --fb-fab-clear: var(--sheet-height);
+  }
+
+  html.map-page:has(.map-timeline:not([hidden])) {
+    --fb-fab-timeline-clear: var(--timeline-height);
+  }
+
+  // Scoped to the map. Every term here is a map custom property, and on a page
+  // with no sheet they resolve to nothing — an invalid calc, which drops the
+  // whole declaration and leaves the dock wherever the base rule put it. That
+  // happens to be survivable, but only by luck, and it stops being true the
+  // moment someone adds a fallback to one of these vars.
+  .map-page .fab-dock {
+    bottom: calc(var(--panel-inset) + var(--fb-fab-clear) + var(--fb-fab-timeline-clear) + 8px);
+    // Rides with the sheet rather than teleporting to the far end of its travel
+    // while the sheet is still moving. Same duration and easing as the slide in
+    // _map.scss; keep the three in step.
+    transition: bottom 0.34s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
+//@ SM ≤767px and short — there is no room for it, so it goes.
+//
+// --sheet-height has a 320px floor, and on a phone held landscape that floor
+// eats almost the whole screen: at 740x360 the sheet is 320px and leaves 40px
+// of map, which cannot hold a 44px button plus its insets. Lifting it anyway
+// put it 27px off the top of the screen, which is worse than the overlap this
+// rule set out to fix.
+//
+// 400px is where the arithmetic turns: the button needs --panel-inset + 44px +
+// 8px ≈ 60px of map above the sheet, and 400 - 320 is the first round height
+// that clears it. Below that the account menu is the way in, which is why the
+// flow was built with two entry points rather than one.
+@media (max-width: 767px) and (max-height: 400px) {
+  // Map pages only. The arithmetic below is entirely about the sheet's 320px
+  // floor eating the screen, and a landscape phone reading /rides or the FAQ has
+  // no sheet and plenty of room — hiding the dock there would remove the way in
+  // for no reason.
+  .map-page .fab-dock {
+    display: none;
+  }
+}
+
+// --- The owner's queue -------------------------------------------------------
+
+// Not a rider surface, so none of the gloved-thumb sizing above applies here —
+// this is read at a desk, and density is the point. It is a worklist, and the
+// job is to see what needs a decision without scrolling past what has already
+// had one.
+//
+// It inherits the app theme rather than being pinned light. The bright-sun rule
+// is about a rider at a gas stop, not about the person running the site.
+
+.queue-page {
+  .q-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 1em 0;
+  }
+
+  .q-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: 0.35em 0.75em;
+    border: 1px solid $grey;
+    border-radius: 999px;
+    text-decoration: none;
+    text-transform: capitalize;
+
+    &.is-on {
+      border-color: $brand;
+      background: color-mix(in srgb, $brand 12%, transparent);
+      font-weight: 600;
+    }
+  }
+
+  .q-count {
+    padding: 0 0.4em;
+    border-radius: 999px;
+    background: $stop;
+    color: $ink-light;
+    font-size: 0.8em;
+    font-weight: 700;
+  }
+
+  .q-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .q-item {
+    margin: 0 0 1.5em;
+    padding: 1em;
+    border: 1px solid $grey;
+    border-radius: 8px;
+
+    // Pending is the only state that wants the eye. Everything else has had a
+    // decision and is here for reference.
+    &.is-pending {
+      border-left: 4px solid $detour;
+    }
+
+    &.is-spam,
+    &.is-declined {
+      opacity: 0.6;
+    }
+  }
+
+  .q-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75em;
+    align-items: baseline;
+    font-size: 0.9rem;
+  }
+
+  .q-id {
+    font-weight: 700;
+  }
+
+  .q-state {
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.8rem;
+  }
+
+  .q-title {
+    margin: 0.3em 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+  }
+
+  .q-facts {
+    margin: 0.5em 0;
+    font-size: 0.9rem;
+  }
+
+  .q-context {
+    font-size: 0.95rem;
+  }
+
+  .q-actions,
+  .q-set,
+  .q-text {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: flex-end;
+    margin-top: 0.75em;
+    padding-top: 0.75em;
+    border-top: 1px dashed $grey;
+  }
+
+  .q-text {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .q-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2em;
+
+    span {
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+  }
+
+  .q-json {
+    max-height: 60vh;
+    overflow: auto;
+    padding: 1em;
+    border-radius: 6px;
+    background: $neutral-96;
+    font-size: 0.85rem;
+  }
+}
+
+// --- The board ---------------------------------------------------------------
+
+// Read at a desk as often as on a phone, so it inherits the app theme rather
+// than the flow's pinned-light treatment. The want button still gets a proper
+// target — it is the one control on the page and it is worth hitting first time.
+
+.b-shipped {
+  margin: 1.5em 0;
+  padding: 1em 1.2em;
+  border-left: 4px solid $go;
+  background: color-mix(in srgb, $go 8%, transparent);
+
+  h2 {
+    margin: 0 0 0.4em;
+    font-size: 1.1rem;
+  }
+
+  ul {
+    margin: 0;
+    padding-left: 1.2em;
+  }
+}
+
+.b-sorts {
+  display: flex;
+  gap: 8px;
+  margin: 1.5em 0 1em;
+}
+
+.b-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.b-card {
+  margin: 0 0 1em;
+  padding: 1em 1.2em;
+  border: 1px solid $grey;
+  border-radius: 8px;
+
+  &.is-shipped {
+    border-color: $go;
+  }
+
+  &.is-not_doing {
+    opacity: 0.7;
+  }
+}
+
+.b-title {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.b-body {
+  margin: 0.4em 0;
+  white-space: pre-wrap;
+}
+
+.b-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1em;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.8em;
+}
+
+.b-who {
+  font-size: 0.9rem;
+}
+
+.b-want button {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15em;
+  // 44px rather than the flow's 60: this is a desk-and-sofa surface, not a
+  // gas-stop one, but it is still the only control on the card.
+  min-height: 44px;
+  padding: 0.4em 1em;
+  border: 2px solid $brand;
+  border-radius: 999px;
+  background: transparent;
+  color: $text;
+  cursor: pointer;
+
+  &:hover {
+    background: color-mix(in srgb, $brand 10%, transparent);
+  }
+}
+
+.b-want.is-wanted button {
+  background: color-mix(in srgb, $brand 16%, transparent);
+  font-weight: 600;
+}
+
+.b-want-label {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.b-count {
+  font-size: 0.85rem;
+}
+
+// Merging is destructive-ish — it moves vote rows onto another report — so it
+// reads as its own control rather than one more field in the edit form.
+.queue-page .q-merge {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  margin-top: 0.5em;
+  padding-top: 0.5em;
+  border-top: 1px dashed $grey;
+
+  button {
+    border-color: $detour;
+  }
+}
