@@ -1,4 +1,5 @@
-import { cloudflareTest } from '@cloudflare/vitest-plugin'
+import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin'
+import { randomBytes } from 'node:crypto'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
@@ -21,8 +22,18 @@ export default defineConfig({
         },
       },
       {
-        plugins: [cloudflareTest({ wrangler: { configPath: './wrangler.jsonc' } })],
-        test: { name: 'worker', include: ['test/worker/**/*.test.ts'] },
+        plugins: [
+          cloudflareTest({
+            wrangler: { configPath: './wrangler.jsonc' },
+            miniflare: {
+              bindings: {
+                TEST_MIGRATIONS: await readD1Migrations('./migrations'),
+                SITE_KEK: randomBytes(32).toString('base64url'),
+              },
+            },
+          }),
+        ],
+        test: { name: 'worker', include: ['test/worker/**/*.test.ts'], setupFiles: ['test/worker/setup.ts'] },
       },
     ],
   },

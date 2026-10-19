@@ -8,13 +8,13 @@
   // Anything that is not a file falls through to the Worker.
   "assets": {
     "directory": "./dist/assets",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
   },
 
   // Rebuilds the widget before every `wrangler dev` reload, and on save under src/widget.
   "build": {
     "command": "node utils/build-widget.js",
-    "watch_dir": "src/widget"
+    "watch_dir": "src/widget",
   },
 
   "d1_databases": [
@@ -23,23 +23,33 @@
       "database_name": "bugzap",
       // Placeholder until the remote database is created (milestone 8). Local dev ignores it.
       "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations"
-    }
+      "migrations_dir": "migrations",
+    },
   ],
 
   "r2_buckets": [
     {
       "binding": "SHOTS",
-      "bucket_name": "bugzap-shots"
-    }
+      "bucket_name": "bugzap-shots",
+    },
+  ],
+
+  "secrets": { "required": ["SITE_KEK"] },
+
+  "ratelimits": [
+    {
+      "name": "INGEST_BURST",
+      "namespace_id": "2833001",
+      "simple": { "limit": 5, "period": 10 },
+    },
   ],
 
   "vars": {
     // console prints mail to the terminal; cloudflare sends it (needs a sending domain).
-    "MAIL_MODE": "console"
+    "MAIL_MODE": "console",
   },
 
   "observability": {
-    "enabled": true
-  }
+    "enabled": true,
+  },
 }

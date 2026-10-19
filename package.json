@@ -16,6 +16,8 @@
     "start:no-open": "OPEN_BROWSER=0 npm start",
     "dev": "wrangler dev --port $npm_package_config_port",
     "build:widget": "node utils/build-widget.js",
+    "setup:local": "node utils/seed-site.js",
+    "identity:local": "node utils/sign-identity.js",
     "types": "wrangler types",
     "typecheck": "tsc -p src/core && tsc -p src/widget && tsc -p src/worker && tsc -p test",
     "test": "vitest run",

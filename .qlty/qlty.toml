@@ -74,6 +74,8 @@ mode = "block"
 
 [[plugin]]
 name = "biome"
+# Match .qlty/configs/biome.jsonc; the source now defaults to incompatible 2.x.
+version = "1.9.4"
 mode = "comment"
 
 [[plugin]]
