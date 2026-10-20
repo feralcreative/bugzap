@@ -3,10 +3,10 @@ export const styles = `
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
 .surface { all: initial; display: block; position: fixed; inset: 0; margin: 0; padding: 0; border: 0; width: 100%; height: 100%; background: transparent; color: #181818; font: 14px/1.5 system-ui, sans-serif; pointer-events: none; overflow: visible; }
-button, textarea, select { font: inherit; color: inherit; }
+button, textarea, select, input { font: inherit; color: inherit; }
 button { cursor: pointer; background: white; border: 1px solid #b8b8b8; border-radius: 5px; padding: 9px 13px; }
 button:hover { background: #ededed; }
-button:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid #2763c7; outline-offset: 2px; }
+button:focus-visible, textarea:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #2763c7; outline-offset: 2px; }
 button:disabled { opacity: .6; cursor: wait; }
 .primary { background: #181818; border-color: #181818; color: white; }
 .primary:hover { background: #383838; }
@@ -31,5 +31,8 @@ textarea { min-height: 130px; resize: vertical; }
 .saved-pin:hover { background: #174a9e; }
 .saved-pin[data-approximate="true"] { background: white; color: #174a9e; border: 2px dashed #2763c7; }
 .pins-toggle { position: absolute; right: 130px; bottom: 20px; pointer-events: auto; }
+.shot img { display: block; width: 100%; max-height: 180px; object-fit: contain; margin-top: 14px; border: 1px solid #ddd; border-radius: 4px; background: #f4f4f4; }
+.shot .check { display: flex; gap: 8px; align-items: center; font-weight: 400; margin: 8px 0 0; }
+.shot input[type="file"] { display: block; width: 100%; font-size: 13px; }
 .report-body { white-space: pre-wrap; overflow-wrap: anywhere; }
 `

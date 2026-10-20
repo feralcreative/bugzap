@@ -11,6 +11,7 @@ import { createRecorder, type Recorder } from './buffer'
 import { collectDiagnostics } from './diagnostics'
 import { guard, safe } from './guard'
 import { type PinWatcher, watchPins } from './pins'
+import { createShots, shotPart } from './shot'
 import type { BugzapApi, WidgetEvent, WidgetListener, WidgetOptions } from './types'
 import { createView, type Phase, type WidgetView } from './ui/view'
 
@@ -29,6 +30,7 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
   let epoch = 0
   let destroyed = false
   let previousFocus: HTMLElement | null = null
+  const shots = createShots(win, defaultApi, nonce, (state) => view?.shot(state))
   const emit = (event: WidgetEvent, detail: Readonly<Record<string, unknown>> = {}) => {
     for (const listener of listeners.get(event) ?? []) guard(listener)(Object.freeze({ ...detail }))
   }
@@ -43,6 +45,7 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
     pending?.abort()
     pending = null
     stopSelection()
+    shots.cancel()
     phase = 'idle'
     pin = null
     view?.clear()
@@ -60,6 +63,7 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
     safe(stopSelection, undefined)
     safe(() => pending?.abort(), undefined)
     pending = null
+    safe(shots.cancel, undefined)
     safe(() => saved?.dispose(), undefined)
     saved = null
     safe(() => view?.dispose(), undefined)
@@ -77,7 +81,9 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
     stopSelection()
     phase = 'compose'
     view?.show(phase, true, pin ? `Pinned to ${pin.tag}` : 'About this page')
-    if (pin) view?.pin(pin.page.x - win.scrollX, pin.page.y - win.scrollY)
+    const point = pin && { x: pin.page.x - win.scrollX, y: pin.page.y - win.scrollY }
+    if (point) view?.pin(point.x, point.y)
+    shots.start(point)
   }
   const selection = () => {
     if (!identified() || !view || pending) return
@@ -144,13 +150,17 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
       screenshot: { mode: 'none' },
       diagnostics: collectDiagnostics(win, recorder, context),
     }
+    const api = config.api!
     const controller = new AbortController()
     pending = controller
     const current = epoch
     view.error('')
     view.sending(true)
     try {
-      const id = await sendReport(win, config.api!, payload, controller)
+      const { screenshot, blob } = shotPart(await shots.settle(), draft.includeShot)
+      if (epoch !== current) return
+      payload.screenshot = screenshot
+      const id = await sendReport(win, api, payload, controller, blob)
       if (epoch !== current) return
       pending = null
       phase = 'success'
@@ -221,6 +231,9 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
             repin: selection,
             submit,
             fail,
+            upload: (file) => {
+              if (phase === 'compose' && !pending) shots.choose(file)
+            },
             saved: (id) => {
               const placement = saved?.get(id)
               if (!placement || phase !== 'idle') return

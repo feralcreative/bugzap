@@ -6,7 +6,7 @@ Built for Routeloop and every other Feral Creative project: a small embeddable s
 
 ## Status
 
-In development. Milestones 1–5 are implemented locally: the dev loop, shared core, report ingestion API, pin-and-submit widget, and saved-pin re-anchoring. Open the demo, click Feedback, choose a target, and send a report. Use [the builder demo](http://localhost:2834/builder.html) to test saved pins through DOM rebuilds. Screenshots and the owner dashboard come next. The decisions and open questions are in [docs/ROADMAP.md](docs/ROADMAP.md), and the build plan is in [\_PLANS/v1-build-plan.md](_PLANS/v1-build-plan.md), tracked as GitHub issues #1–#8. Code being borrowed from other projects is in [reference/](reference/README.md), which is read-only source material and is never run.
+In development. Milestones 1–6 are implemented locally: the dev loop, shared core, report ingestion API, pin-and-submit widget, saved-pin re-anchoring, and masked screenshots with an upload fallback. Open the demo, click Feedback, choose a target, and send a report. Use [the builder demo](http://localhost:2834/builder.html) to test saved pins through DOM rebuilds and [the map demo](http://localhost:2834/map.html) to test screenshots. The owner dashboard comes next. The decisions and open questions are in [docs/ROADMAP.md](docs/ROADMAP.md), and the build plan is in [\_PLANS/v1-build-plan.md](_PLANS/v1-build-plan.md), tracked as GitHub issues #1–#8. Code being borrowed from other projects is in [reference/](reference/README.md), which is read-only source material and is never run.
 
 ## Development
 

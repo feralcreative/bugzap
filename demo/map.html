@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bugzap map test</title>
+    <style>
+      body {
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        max-width: 60rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        color: #222;
+        background: #fafafa;
+      }
+      p {
+        text-wrap: pretty;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      #map {
+        display: block;
+        width: 100%;
+        height: 320px;
+        border-radius: 6px;
+      }
+      iframe {
+        width: 100%;
+        height: 120px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+      }
+      label {
+        display: block;
+        margin: 0.5rem 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Bugzap map test</h1>
+    <p>
+      Pin the map or the frame: a DOM screenshot cannot see WebGL or cross-origin frames, so the composer asks for an
+      upload instead. Pin the sign-in form and the password and card number come out as gray&nbsp;boxes.
+    </p>
+    <div class="card" data-bugzap-id="map">
+      <h2>WebGL map</h2>
+      <canvas id="map" width="900" height="320"></canvas>
+    </div>
+    <div class="card" data-bugzap-id="frame">
+      <h2>Cross-origin frame</h2>
+      <iframe src="{{BUGZAP_ORIGIN}}/healthz" title="Worker health check"></iframe>
+    </div>
+    <form class="card" data-bugzap-id="sign-in" onsubmit="return false">
+      <h2>Sign in</h2>
+      <label>Email <input type="email" value="rider@example.com" /></label>
+      <label>Password <input type="password" value="hunter2-do-not-capture" /></label>
+      <label>Card number <input autocomplete="cc-number" value="4242 4242 4242 4242" /></label>
+      <p data-bugzap-mask>Account note: this paragraph is masked.</p>
+      <button type="submit" data-bugzap-id="sign-in-button">Sign in</button>
+    </form>
+    <p><a href="/">Back to the main demo</a></p>
+
+    <script>
+      window.Bugzap = window.Bugzap || function () { (Bugzap.q = Bugzap.q || []).push(arguments); };
+      Bugzap("init", {{BUGZAP_CONFIG}});
+      // Tiles drawn with WebGL and no preserveDrawingBuffer, like a vector map.
+      const gl = document.querySelector('#map').getContext('webgl');
+      if (gl) {
+        gl.enable(gl.SCISSOR_TEST);
+        for (let x = 0; x < 900; x += 60)
+          for (let y = 0; y < 320; y += 60) {
+            gl.scissor(x, y, 60, 60);
+            const shade = ((x + y) / 60) % 2 ? 0.78 : 0.86;
+            gl.clearColor(shade - 0.1, shade, shade - 0.2, 1);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+          }
+      }
+    </script>
+    <script async src="{{BUGZAP_ORIGIN}}/v1/bugzap.js"></script>
+  </body>
+</html>

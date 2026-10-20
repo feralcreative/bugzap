@@ -22,6 +22,8 @@ const TYPES = {
 createServer(async (req, res) => {
   if (![`localhost:${PORT}`, `127.0.0.1:${PORT}`, `[::1]:${PORT}`].includes(req.headers.host))
     return void res.writeHead(403).end('Use the local demo origin.')
+  // The demo pages have no icon; answer the browser's automatic request quietly.
+  if (req.url === '/favicon.ico') return void res.writeHead(204).end()
   let path
   try {
     path = normalize(decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname))

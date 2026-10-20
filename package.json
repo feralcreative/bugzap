@@ -24,7 +24,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "hono": "^4.13.13"
+    "hono": "^4.13.13",
+    "modern-screenshot": "^4.7.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.4.4",

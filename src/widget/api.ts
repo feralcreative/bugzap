@@ -34,10 +34,12 @@ export async function sendReport(
   api: string,
   payload: ReportPayload,
   controller: AbortController,
+  screenshot?: Blob,
 ): Promise<string> {
   if (typeof win.fetch !== 'function') throw new ReportError('This browser cannot send reports.', 'fetch_unavailable')
   const form = new FormData()
   form.set('payload', encodePayload(payload))
+  if (screenshot) form.set('screenshot', new File([screenshot], 'screenshot.jpg', { type: 'image/jpeg' }))
   const timer = win.setTimeout(() => controller.abort(), 15000)
   try {
     const res = await win.fetch(`${api}/v1/reports?site=${encodeURIComponent(payload.site)}`, {

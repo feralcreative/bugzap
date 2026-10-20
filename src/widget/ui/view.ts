@@ -1,6 +1,7 @@
 import type { ReportKind } from '../../core/policy'
 import { BODY_MAX, statusLabel } from '../../core/policy'
 import type { PinPlacement } from '../pins'
+import type { ShotState } from '../shot'
 import { guard, safe } from '../guard'
 import { styles } from './style'
 
@@ -13,6 +14,7 @@ export type ViewActions = {
   submit: () => Promise<void>
   fail: () => void
   saved: (id: string) => void
+  upload: (file: File) => void
 }
 
 export function createView(doc: Document, actions: ViewActions, nonce?: string) {
@@ -108,11 +110,66 @@ export function createView(doc: Document, actions: ViewActions, nonce?: string) 
   error.id = 'bugzap-error'
   error.setAttribute('role', 'status')
   error.setAttribute('aria-live', 'polite')
+  const shot = element('div', undefined, 'shot')
+  const preview = element('img')
+  preview.alt = 'Screenshot preview'
+  preview.addEventListener('error', () => {
+    preview.hidden = true
+  })
+  const shotStatus = element('p', undefined, 'target')
+  shotStatus.setAttribute('aria-live', 'polite')
+  const includeLabel = element('label', undefined, 'check')
+  const include = element('input')
+  include.type = 'checkbox'
+  include.checked = true
+  includeLabel.append(include, ' Include screenshot')
+  const uploadLabel = element('label', 'Attach a screenshot', 'upload')
+  uploadLabel.htmlFor = 'bugzap-upload'
+  const upload = element('input')
+  upload.id = 'bugzap-upload'
+  upload.type = 'file'
+  upload.accept = 'image/png,image/jpeg,image/webp'
+  upload.addEventListener(
+    'change',
+    guard(() => {
+      const file = upload.files?.[0]
+      upload.value = ''
+      if (file) actions.upload(file)
+    }, actions.fail),
+  )
+  shot.append(preview, shotStatus, includeLabel, uploadLabel, upload)
+  let previewUrl = ''
+  const showShot = (state: ShotState) => {
+    if (previewUrl) safe(() => URL.revokeObjectURL(previewUrl), undefined)
+    previewUrl = state.kind === 'ready' ? safe(() => URL.createObjectURL(state.blob), '') : ''
+    if (previewUrl) preview.src = previewUrl
+    else preview.removeAttribute('src')
+    shot.hidden = state.kind === 'off'
+    preview.hidden = !previewUrl
+    includeLabel.hidden = state.kind !== 'ready'
+    if (state.kind === 'ready') include.checked = true
+    uploadLabel.hidden = upload.hidden =
+      state.kind === 'capturing' || state.kind === 'reading' || (state.kind === 'ready' && state.mode === 'auto')
+    uploadLabel.textContent = state.kind === 'ready' ? 'Replace screenshot' : 'Attach a screenshot'
+    shotStatus.textContent =
+      state.kind === 'capturing'
+        ? 'Capturing a screenshot…'
+        : state.kind === 'reading'
+          ? 'Preparing your image…'
+          : state.kind !== 'missing'
+            ? ''
+            : state.reason === 'blank'
+              ? 'The screenshot came out blank here, as maps and embedded frames do. You can attach your own instead.'
+              : state.reason === 'unreadable'
+                ? 'That image could not be read. Choose a PNG, JPEG, or WebP under 20 MB.'
+                : 'A screenshot could not be captured. You can attach your own instead.'
+    shotStatus.hidden = !shotStatus.textContent
+  }
   const actionsRow = element('div', undefined, 'actions')
   const cancel = button('Cancel', actions.close)
   const send = button('Send report', () => actions.submit(), 'primary')
   actionsRow.append(cancel, send)
-  form.append(target, kindLabel, kind, bodyLabel, body, error, actionsRow)
+  form.append(target, kindLabel, kind, bodyLabel, body, shot, error, actionsRow)
   const success = element('div')
   success.setAttribute('role', 'status')
   const done = button('Done', actions.close, 'primary')
@@ -139,6 +196,7 @@ export function createView(doc: Document, actions: ViewActions, nonce?: string) 
     pin.hidden =
     success.hidden =
     detail.hidden =
+    shot.hidden =
     toggle.hidden =
     savedLayer.hidden =
       true
@@ -210,16 +268,18 @@ export function createView(doc: Document, actions: ViewActions, nonce?: string) 
       detailApproximate.hidden = !resolution.approximate
       detailClose.focus()
     },
-    draft: () => ({ kind: kind.value as ReportKind, body: body.value }),
+    draft: () => ({ kind: kind.value as ReportKind, body: body.value, includeShot: include.checked }),
+    shot: showShot,
     clear() {
+      showShot({ kind: 'off' })
       body.value = ''
       kind.value = 'bug'
       error.textContent = ''
       send.disabled = false
-      body.disabled = kind.disabled = repin.disabled = false
+      body.disabled = kind.disabled = repin.disabled = include.disabled = upload.disabled = false
     },
     sending(value: boolean) {
-      send.disabled = body.disabled = kind.disabled = repin.disabled = value
+      send.disabled = body.disabled = kind.disabled = repin.disabled = include.disabled = upload.disabled = value
       send.textContent = value ? 'Sending…' : 'Send report'
       form.setAttribute('aria-busy', String(value))
       error.textContent = value ? 'Sending report…' : ''
@@ -248,7 +308,7 @@ export function createView(doc: Document, actions: ViewActions, nonce?: string) 
       if (!launcher.hidden) launcher.focus()
     },
     trapTab(event: KeyboardEvent) {
-      const nodes = Array.from(panel.querySelectorAll<HTMLElement>('button, textarea, select')).filter(
+      const nodes = Array.from(panel.querySelectorAll<HTMLElement>('button, textarea, select, input')).filter(
         (node) => !node.closest('[hidden]') && !node.hasAttribute('disabled'),
       )
       const active = shadow.activeElement
@@ -265,6 +325,7 @@ export function createView(doc: Document, actions: ViewActions, nonce?: string) 
       }
     },
     dispose() {
+      showShot({ kind: 'off' })
       safe(() => surface.hidePopover(), undefined)
       host.remove()
     },

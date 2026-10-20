@@ -1,6 +1,6 @@
 # Embedding Bugzap
 
-Milestones 4–5 support pinning an element, page-level feedback, sending reports, and displaying the reporter’s saved pins after reloads and DOM changes. Reports include the anchor and redacted diagnostics. Screenshots and the owner dashboard are later milestones.
+Milestones 4–6 support pinning an element, page-level feedback, sending reports with a screenshot, and displaying the reporter’s saved pins after reloads and DOM changes. Reports include the anchor, redacted diagnostics, and a masked screenshot or the reporter’s own upload. The owner dashboard is a later milestone.
 
 ## Try the local demo
 
@@ -62,7 +62,7 @@ The queue works before or after the async script loads. Calls return without thr
 
 Use `data-bugzap-id="save"` for stable targets or ancestors. Capture also records test attributes and hand-written IDs, skipping generated IDs. An anchor includes ancestry, a CSS selector, tag, bounded text and label, element bounds, fractional click offset, page coordinates, and viewport size. Masked text, input values, textarea content, and editable content are excluded from anchor text. Saved pins are loaded for the current reporter and normalized page on subsequent visits.
 
-Use `data-bugzap-ignore` on regions that must not be pinned. Use `data-bugzap-mask` on private content: its text is omitted from anchors now, and it is reserved for screenshot masking in milestone 6. A cross-origin iframe's contents cannot be inspected; its border can be selected as an iframe box. Interior iframe selection is not implemented in this milestone.
+Use `data-bugzap-ignore` on regions that must not be pinned. Use `data-bugzap-mask` on private content: its text is omitted from anchors and it is blanked in screenshots. A cross-origin iframe's contents cannot be inspected; its border can be selected as an iframe box. Interior iframe selection is not implemented in this milestone.
 
 The recorder keeps the earliest 25 errors and ten failed or slow requests (at least three seconds). It preserves the host's console and fetch behavior, tolerates frozen or missing APIs, and stops collecting on logout. Diagnostics never read cookies or storage contents and never request a location. Query strings are stripped on the client and again by the Worker before storage. Oversized diagnostics are trimmed to fit the JSON cap so they cannot block a valid report.
 
@@ -70,7 +70,7 @@ Submission disables duplicate sends and ends the request after 15 seconds. Error
 
 ## Build and verification
 
-`npm run build:widget` emits `dist/assets/v1/bugzap.js` and the static asset headers. The public script is served with CORS enabled, `nosniff`, and a five-minute cache lifetime. The build enforces a 15 KiB gzip limit; screenshot code is not included in this milestone.
+`npm run build:widget` emits `dist/assets/v1/bugzap.js` and the static asset headers. The public script is served with CORS enabled, `nosniff`, and a five-minute cache lifetime. The build enforces a 15 KiB gzip limit on that file. Screenshot code is a separate chunk, `dist/assets/v1/capture-<hash>.js`, whose content-hashed path is compiled into the embed; it is served with CORS, `nosniff`, and an immutable one-year cache, and old chunks are deleted on rebuild.
 
 Widget tests run in happy-dom with their own DOM-only TypeScript config. Core and Worker tests use separate types so DOM `Element` and Workers HTMLRewriter `Element` do not collide. Coverage includes queue startup, pin capture, ignored regions, keyboard focus, error recovery, missing APIs, frozen console, logout isolation, cross-origin submission, retries, and diagnostics limits.
 
@@ -81,3 +81,15 @@ Open <http://localhost:2834/builder.html>, pin Save changes, and submit. After D
 The resolver tries unique stable attributes, a selector scoped to a stable ancestor, the full selector, then a bounded fuzzy match. It preserves the fractional click position as the target moves or resizes. Missing stable targets and ambiguous matches use the original point scaled to the viewport, with an explicit approximate label. MutationObserver handles DOM replacement; ResizeObserver, scrolling, and resizing update geometry. Work is coalesced per animation frame. SPA pushState, replaceState, popstate, and hashchange refresh pins only when the normalized page changes. Logout and destroy cancel pending reads and remove observers and owned history hooks.
 
 `GET /v1/pins?site=PUBLIC_KEY&page=NORMALIZED_PAGE_URL` requires `Authorization: Bearer SIGNED_IDENTITY_TOKEN`. Tokens never belong in the URL. The endpoint checks the site, exact allowed Origin, identity signature and rotation grace, and page origin. It returns `{ ok: true, pins, truncated }` with at most the latest 100 pinned reports owned by that subject on that site and page, in pending or published state. Each pin contains only public ID, kind, status, title, body, and anchor. Page-level, archived, and spam reports are excluded. Other reporters’ published reports and owner-only fields are excluded. Reporter tokens cannot request owner access. Reads use no cookies, responses are no-store, and the per-site/reporter read limit is 60/minute with Retry-After on 429. Read failures clear markers while leaving report composition available.
+
+## Screenshots
+
+Choosing a target, or Report this page, starts a capture in the background while the reporter writes. The first capture loads the screenshot chunk from the embed’s own origin through a script tag that carries the embed’s CSP nonce. The chunk renders the DOM with modern-screenshot, excluding the widget itself, and crops the viewport to at most 1200×800 CSS pixels around the pin (or the viewport center for page reports). It draws a ring at the click point and encodes a JPEG at quality 0.85, stepping down to 0.7 and 0.5 if needed to stay under the 2 MiB server limit. The composer shows a preview and an Include screenshot checkbox.
+
+Password fields, `autocomplete="cc-*"` fields, and anything inside `data-bugzap-mask` are hidden in the rendered copy and then painted over with gray boxes, so either mechanism alone keeps their contents out of the image.
+
+A DOM render cannot see WebGL canvases or cross-origin frames. When the point under the pin is an iframe, embed, or object, or a 96×96 sample around it comes out a single flat color, the composer says the screenshot came out blank and offers a file input instead. It also offers one when capture fails or takes longer than 5 seconds. Uploads are decoded and re-encoded through a canvas as JPEG with a 2000 px long edge, which drops EXIF and the original filename; files over 20 MB are refused before decoding.
+
+The report is never blocked by a screenshot. Sending waits for a capture or upload still in progress, then sends `screenshot.mode` as `auto` or `upload` with the file, or `none` with a `failed` reason: `capture blank under the pin`, `capture failed`, `capture timed out`, `upload unreadable`, or `excluded by reporter`. The server strips metadata again and stores the image privately in R2.
+
+Open <http://localhost:2834/map.html> to try it: pinning the WebGL map or the frame prompts for an upload, and pinning the sign-in form shows the password, card number, and masked note as gray boxes.

@@ -20,7 +20,7 @@ Ported to `src/core/` on 2026-10-18 (issue #2) and deleted from here: `src/feedb
 
 Ported on 2026-10-19 (issue #4) and deleted from here: `public/js/feedback-buffer.js` and its test. The bounded recorder, host-safe hooks, and diagnostics collection now live in `src/widget/buffer.ts` and `src/widget/diagnostics.ts`, with widget tests under `test/widget/`. Routeloop-specific route patterns and preference blocks were not carried over.
 
-- `public/js/feedback.js` re-encodes photos through a canvas to strip EXIF (GPS) and offers FAQ suggestions. It is progressive enhancement over a plain form POST.
+- `public/js/feedback.js` re-encodes photos through a canvas to strip EXIF (GPS) and offers FAQ suggestions. Its `collect()` is ported to `src/widget/diagnostics.ts` (issue #4) and its `shrink()` to `shrink()` in `src/widget/capture/index.ts` (issue #6); it stays only for the FAQ suggestions that go with `faq.ts`.
 
 ### Server side, coupled to Routeloop
 

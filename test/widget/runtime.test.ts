@@ -3,6 +3,9 @@ import { parseReportPayload } from '../../src/core/payload'
 import { installWidget } from '../../src/widget/runtime'
 import type { BugzapApi } from '../../src/widget/types'
 
+const chunk = vi.hoisted(() => ({ capture: vi.fn(), shrink: vi.fn() }))
+vi.mock('../../src/widget/capture/load', () => ({ loadCapture: async () => chunk }))
+
 const API = 'https://collector.example'
 const SITE = 'bz_pk_ABCDEFGHIJKLMNOPQRSTUV'
 const TOKEN = 'demo-identity-for-widget-tests'
@@ -46,6 +49,8 @@ function stubFetch() {
 }
 
 beforeEach(() => {
+  chunk.capture.mockReset().mockRejectedValue(new Error('no canvas in tests'))
+  chunk.shrink.mockReset()
   stubFetch()
   api = installWidget(window, API)
 })
@@ -236,7 +241,7 @@ describe('pinning and report composition', () => {
     const send = button('Send report')
     send.click()
     send.click()
-    expect(fetch).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
     expect((fetch.mock.calls[0]![1]!.signal as AbortSignal).aborted).toBe(false)
     api('identify', 'new-identity')
     expect((fetch.mock.calls[0]![1]!.signal as AbortSignal).aborted).toBe(true)
@@ -272,6 +277,92 @@ describe('pinning and report composition', () => {
     button('Send report').click()
     expect(fetch).not.toHaveBeenCalled()
     expect(shadow().querySelector('.error')?.textContent).toContain('Write between')
+  })
+})
+
+describe('screenshots', () => {
+  const sent = () =>
+    stubFetch().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, id: 'ABCDEFGHIJKLMNOPQRSTUV' }), { status: 201 }),
+    )
+  const jpeg = (label: string) => new Blob([label], { type: 'image/jpeg' })
+  async function send(fetch: ReturnType<typeof sent>) {
+    textArea().value = 'The save button does nothing.'
+    button('Send report').click()
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    const form = fetch.mock.calls[0]![1]!.body as FormData
+    return { payload: JSON.parse(String(form.get('payload'))), file: form.get('screenshot') }
+  }
+
+  it('captures around the pin and sends the image as the screenshot part', async () => {
+    const fetch = sent()
+    chunk.capture.mockResolvedValue({ blob: jpeg('auto'), blank: false })
+    ready()
+    button('Feedback').click()
+    click(target())
+    await vi.waitFor(() => expect(chunk.capture).toHaveBeenCalledWith(window, { x: 45, y: 55 }))
+    await vi.waitFor(() => expect(shadow().querySelector<HTMLImageElement>('.shot img')?.hidden).toBe(false))
+    const { payload, file } = await send(fetch)
+    expect(payload.screenshot).toEqual({ mode: 'auto' })
+    expect(file).toBeInstanceOf(File)
+    expect((file as File).name).toBe('screenshot.jpg')
+    expect(await (file as File).text()).toBe('auto')
+  })
+
+  it('prompts for an upload when the area under the pin is blank and sends the re-encoded file', async () => {
+    const fetch = sent()
+    chunk.capture.mockResolvedValue({ blob: jpeg('gray'), blank: true })
+    chunk.shrink.mockResolvedValue(jpeg('uploaded'))
+    ready()
+    api('open')
+    click(target())
+    await vi.waitFor(() => expect(shadow().textContent).toContain('came out blank'))
+    const input = shadow().querySelector<HTMLInputElement>('input[type="file"]')!
+    expect(input.closest('[hidden]')).toBeNull()
+    const original = new File(['exif'], 'IMG_0001 home.jpg', { type: 'image/jpeg' })
+    Object.defineProperty(input, 'files', { value: [original], configurable: true })
+    input.dispatchEvent(new Event('change'))
+    await vi.waitFor(() => expect(chunk.shrink).toHaveBeenCalledWith(window, original))
+    const { payload, file } = await send(fetch)
+    expect(payload.screenshot).toEqual({ mode: 'upload' })
+    expect((file as File).name).toBe('screenshot.jpg')
+    expect(await (file as File).text()).toBe('uploaded')
+  })
+
+  it('still sends the text report when capture fails, and honors an excluded screenshot', async () => {
+    let fetch = sent()
+    ready()
+    api('open', { page: true })
+    await vi.waitFor(() => expect(chunk.capture).toHaveBeenCalledWith(window, null))
+    let result = await send(fetch)
+    expect(result.payload.screenshot).toEqual({ mode: 'none', failed: 'capture failed' })
+    expect(result.file).toBeNull()
+    button('Done').click()
+
+    fetch = sent()
+    chunk.capture.mockResolvedValue({ blob: jpeg('auto'), blank: false })
+    api('open', { page: true })
+    await vi.waitFor(() => expect(shadow().textContent).toContain('Include screenshot'))
+    shadow().querySelector<HTMLInputElement>('input[type="checkbox"]')!.click()
+    result = await send(fetch)
+    expect(result.payload.screenshot).toEqual({ mode: 'none', failed: 'excluded by reporter' })
+    expect(result.file).toBeNull()
+  })
+
+  it('drops a capture that finishes after the composer closes', async () => {
+    let finish!: (shot: { blob: Blob; blank: boolean }) => void
+    chunk.capture.mockReturnValue(
+      new Promise((done) => {
+        finish = done
+      }),
+    )
+    ready()
+    api('open', { page: true })
+    api('close')
+    finish({ blob: jpeg('late'), blank: false })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(shadow().querySelector('.shot')?.hasAttribute('hidden')).toBe(true)
   })
 })
 
