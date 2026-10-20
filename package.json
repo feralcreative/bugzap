@@ -12,14 +12,14 @@
     "demoPort": "2834"
   },
   "scripts": {
-    "start": "trap 'kill 0' INT TERM EXIT; node utils/open-when-ready.js & node utils/demo-server.js & npm run dev",
+    "start": "trap 'trap - INT TERM EXIT; kill 0' INT TERM EXIT; node utils/open-when-ready.js & node utils/demo-server.js & npm run dev",
     "start:no-open": "OPEN_BROWSER=0 npm start",
     "dev": "wrangler dev --port $npm_package_config_port",
     "build:widget": "node utils/build-widget.js",
     "setup:local": "node utils/seed-site.js",
     "identity:local": "node utils/sign-identity.js",
     "types": "wrangler types",
-    "typecheck": "tsc -p src/core && tsc -p src/widget && tsc -p src/worker && tsc -p test",
+    "typecheck": "tsc -p src/core && tsc -p src/widget && tsc -p src/worker && tsc -p test && tsc -p test/widget",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -87,7 +87,9 @@ export function stripUrl(raw: string): string {
 // Anything URL-shaped inside free text: an error message, a stack frame, a
 // console.error argument. A fetch failure message routinely embeds the full URL it
 // failed on, query string and all.
-const URL_IN_TEXT = /\b((?:https?:\/\/|\/)[^\s'"`)\]]+)/gi
+// A slash is not a word character: a leading word boundary misses `/api?token`
+// after whitespace and only starts matching at a later slash in longer paths.
+const URL_IN_TEXT = /((?:https?:\/\/|\/)[^\s'"`)\]]+)/gi
 
 /** Free text with every embedded URL stripped of its query string and fragment. */
 export function scrubUrls(text: string): string {

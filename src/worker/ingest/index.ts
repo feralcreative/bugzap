@@ -1,11 +1,10 @@
 import { Hono } from 'hono'
 import { redactDiagnostics, scrubUrls } from '../../core/diagnostics'
 import { generateId, isPublicKey } from '../../core/ids'
-import { verifyIdentity } from '../../core/identity'
 import { parseReportPayload } from '../../core/payload'
 import { SUBMIT_LIMIT } from '../../core/policy'
 import { normalizeOrigin, urlKey } from '../../core/url'
-import { decryptSiteSecret } from '../crypto'
+import { siteIdentity } from '../identity'
 import { allowsOrigin, findIngestSite, hourlyCount, reportExists, saveReport } from '../db/scoped'
 import { checkRequestSize, IngestError, readPayloadPart, readReportForm } from './body'
 import { prepareImages } from './images'
@@ -56,17 +55,13 @@ ingest.post('/', async (c) => {
     throw new IngestError(400, 'invalid_site_key', 'The site key does not match the request URL.')
 
   const now = Math.floor(Date.now() / 1000)
-  const secrets = [await decryptSiteSecret(site.secret_cipher, c.env.SITE_KEK, site.public_key)]
-  if (site.previous_secret_cipher && (site.previous_secret_expires_at ?? 0) > now)
-    secrets.push(await decryptSiteSecret(site.previous_secret_cipher, c.env.SITE_KEK, site.public_key))
-  const identity = await verifyIdentity(raw.identity, secrets, now)
-  if (!identity.ok) throw new IngestError(401, 'invalid_identity', 'Your identity token is invalid or expired.')
-  const burst = await c.env.INGEST_BURST.limit({ key: JSON.stringify([site.public_key, identity.claims.sub]) })
+  const claims = await siteIdentity(c.env, site, raw.identity, now)
+  const burst = await c.env.INGEST_BURST.limit({ key: JSON.stringify([site.public_key, claims.sub]) })
   if (!burst.success) {
     c.header('Retry-After', '10')
     throw new IngestError(429, 'burst_limited', 'Please wait a few seconds before submitting again.')
   }
-  if ((await hourlyCount(c.env.DB, site, identity.claims.sub, now)) >= SUBMIT_LIMIT) {
+  if ((await hourlyCount(c.env.DB, site, claims.sub, now)) >= SUBMIT_LIMIT) {
     c.header('Retry-After', '3600')
     throw new IngestError(429, 'hourly_limited', 'You can submit ten reports per site per hour.')
   }
@@ -95,7 +90,7 @@ ingest.post('/', async (c) => {
       await c.env.SHOTS.put(image.key, image.data, { httpMetadata: { contentType: image.mime } })
     }
     writingDatabase = true
-    await saveReport(c.env.DB, site, { publicId, claims: identity.claims, payload, pageKey, diagnostics, images, now })
+    await saveReport(c.env.DB, site, { publicId, claims, payload, pageKey, diagnostics, images, now })
   } catch (error) {
     // A lost database response is ambiguous: do not delete an image belonging to
     // a report that actually committed. If D1 cannot confirm, leave it for sweep.

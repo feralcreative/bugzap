@@ -255,6 +255,8 @@ describe('scrubUrls', () => {
 
   it('strips a relative path embedded in text', () => {
     expect(scrubUrls('POST /api/save?slug=Xk9 failed')).toBe('POST /api/save failed')
+    expect(scrubUrls('POST /api?token=secret failed')).toBe('POST /api failed')
+    expect(scrubUrls('at fetch (/bundle?token=secret:12:1)')).toBe('at fetch (/bundle)')
   })
 
   it('leaves text with no URL alone', () => {

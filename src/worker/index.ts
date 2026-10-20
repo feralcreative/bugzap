@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import ingest from './ingest'
 import { IngestError } from './ingest/body'
+import pins from './pins'
 
 const app = new Hono<{ Bindings: Env }>()
 
@@ -8,6 +9,7 @@ const app = new Hono<{ Bindings: Env }>()
 // the Worker look down. Also what utils/open-when-ready.js polls in dev.
 app.get('/healthz', (c) => c.text('ok'))
 app.route('/v1/reports', ingest)
+app.route('/v1/pins', pins)
 
 app.onError((error, c) => {
   if (error instanceof IngestError)

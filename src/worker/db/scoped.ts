@@ -2,6 +2,7 @@ import type { Diagnostics } from '../../core/diagnostics'
 import type { IdentityClaims } from '../../core/identity'
 import type { ReportPayload } from '../../core/payload'
 import { titleFrom } from '../../core/policy'
+import { parseSavedPin, PINS_MAX, type SavedPin } from '../../core/pins'
 
 export type IngestSite = {
   id: number
@@ -152,4 +153,32 @@ export async function saveReport(
     )
   }
   await db.batch(statements)
+}
+
+export async function reporterPins(
+  db: D1Database,
+  site: IngestSite,
+  subject: string,
+  pageKey: string,
+): Promise<{ pins: SavedPin[]; truncated: boolean }> {
+  const { results } = await db
+    .prepare(
+      `SELECT r.public_id AS id, r.kind, r.status, r.title, r.body, p.anchor_json
+    FROM reports r JOIN reporters author ON author.account_id = r.account_id AND author.site_id = r.site_id AND author.id = r.reporter_id
+    JOIN pins p ON p.account_id = r.account_id AND p.site_id = r.site_id AND p.report_id = r.id
+    WHERE r.account_id = ? AND r.site_id = ? AND author.subject = ? AND r.page_key = ?
+      AND r.state IN ('pending', 'published') ORDER BY r.id DESC LIMIT ?`,
+    )
+    .bind(site.account_id, site.id, subject, pageKey, PINS_MAX + 1)
+    .all<{ id: string; kind: string; status: string; title: string; body: string; anchor_json: string }>()
+  const pins: SavedPin[] = []
+  for (const row of results.slice(0, PINS_MAX)) {
+    try {
+      const pin = parseSavedPin({ ...row, anchor: JSON.parse(row.anchor_json) })
+      if (pin) pins.push(pin)
+    } catch {
+      /* A damaged historical anchor must not break the rest of the page. */
+    }
+  }
+  return { pins, truncated: results.length > PINS_MAX }
 }

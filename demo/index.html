@@ -1,32 +1,73 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Bugzap demo host</title>
-  <style>
-    body { font: 16px/1.5 system-ui, sans-serif; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; color: #222; background: #fafafa; }
-    .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
-    p { text-wrap: pretty; }
-  </style>
-</head>
-<body>
-  <h1>Bugzap demo host</h1>
-  <p>A stand-in for a site that embeds Bugzap. It runs on its own origin so the widget talks to the Worker cross-origin, the same way it will on a real&nbsp;site.</p>
-  <div class="card" data-bugzap-id="pricing">
-    <h2>Pricing</h2>
-    <p>Free for one site, paid plans for&nbsp;more.</p>
-    <button type="button">Choose a plan</button>
-  </div>
-  <div class="card">
-    <h2>No stable anchor</h2>
-    <p>This card has no data attribute, so a pin here falls back to a selector and the click&nbsp;point.</p>
-  </div>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bugzap demo host</title>
+    <style>
+      body {
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        max-width: 48rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        color: #222;
+        background: #fafafa;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      p {
+        text-wrap: pretty;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Bugzap demo host</h1>
+    <p>
+      Use Feedback to select an element and send a report. Choose Report this page to submit without a pin. Reports go
+      to the local Worker on a separate origin.
+    </p>
+    <div class="card" data-bugzap-id="editor">
+      <h2>Host page controls</h2>
+      <p>Outside pin mode, Save changes updates the counter. Selecting it for feedback must not save anything.</p>
+      <button type="button" data-bugzap-id="save">Save changes</button>
+      <p><output id="host-count">Saves: 0</output></p>
+    </div>
+    <div class="card" data-bugzap-ignore>
+      <h2>Ignored area</h2>
+      <p>This area cannot be pinned. Its button keeps working in pin mode.</p>
+      <button type="button" id="ignored-action">Run ignored action</button>
+      <p><output id="ignored-count">Actions: 0</output></p>
+    </div>
+    <div class="card" data-bugzap-mask>
+      <h2>Masked area</h2>
+      <label>Private note <input type="text" value="Do not collect this value" /></label>
+    </div>
+    <div class="card">
+      <h2>No stable anchor</h2>
+      <p>This card has no data attribute, so a pin here falls back to a selector and the click&nbsp;point.</p>
+    </div>
 
-  <script>
-    window.Bugzap = window.Bugzap || function () { (Bugzap.q = Bugzap.q || []).push(arguments); };
-    Bugzap("init", { site: "bz_pk_demo" });
-  </script>
-  <script async src="{{BUGZAP_ORIGIN}}/v1/bugzap.js"></script>
-</body>
+    <script>
+      window.Bugzap = window.Bugzap || function () { (Bugzap.q = Bugzap.q || []).push(arguments); };
+      Bugzap("init", {{BUGZAP_CONFIG}});
+      Bugzap("context", { build: "local-demo" });
+      let saves = 0;
+      document.querySelector('[data-bugzap-id="save"]').addEventListener('click', function () {
+        document.querySelector('#host-count').textContent = 'Saves: ' + (++saves);
+      });
+      let actions = 0;
+      document.querySelector('#ignored-action').addEventListener('click', function () {
+        document.querySelector('#ignored-count').textContent = 'Actions: ' + (++actions);
+      });
+    </script>
+    <script async src="{{BUGZAP_ORIGIN}}/v1/bugzap.js"></script>
+    <p><a href="/builder.html">Saved-pin builder test</a></p>
+  </body>
 </html>

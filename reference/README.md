@@ -18,7 +18,8 @@ Ported to `src/core/` on 2026-10-18 (issue #2) and deleted from here: `src/feedb
 
 ### Client side
 
-- `public/js/feedback-buffer.js` is a crash-proof ring buffer of console errors and failed requests, plus the diagnostics shaper. It is the closest thing here to Bugzap's embeddable script, and it already follows the rule that an error reporter must never crash the page.
+Ported on 2026-10-19 (issue #4) and deleted from here: `public/js/feedback-buffer.js` and its test. The bounded recorder, host-safe hooks, and diagnostics collection now live in `src/widget/buffer.ts` and `src/widget/diagnostics.ts`, with widget tests under `test/widget/`. Routeloop-specific route patterns and preference blocks were not carried over.
+
 - `public/js/feedback.js` re-encodes photos through a canvas to strip EXIF (GPS) and offers FAQ suggestions. It is progressive enhancement over a plain form POST.
 
 ### Server side, coupled to Routeloop
@@ -36,4 +37,4 @@ These import Routeloop's Drizzle `db`, its schema, its config, and its page layo
 
 ### Tests
 
-`test/` holds the tests for what is left here: the client ring buffer and the FAQ matcher.
+`test/` holds the remaining FAQ matcher tests.

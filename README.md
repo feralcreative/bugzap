@@ -6,7 +6,7 @@ Built for Routeloop and every other Feral Creative project: a small embeddable s
 
 ## Status
 
-In development. Milestones 1–3 are implemented locally: the dev loop, shared core, and report ingestion API. The widget is still a stub; pinning, automatic capture, and the owner dashboard come next. The decisions and open questions are in [docs/ROADMAP.md](docs/ROADMAP.md), and the build plan is in [\_PLANS/v1-build-plan.md](_PLANS/v1-build-plan.md), tracked as GitHub issues #1–#8. Code being borrowed from other projects is in [reference/](reference/README.md), which is read-only source material and is never run.
+In development. Milestones 1–5 are implemented locally: the dev loop, shared core, report ingestion API, pin-and-submit widget, and saved-pin re-anchoring. Open the demo, click Feedback, choose a target, and send a report. Use [the builder demo](http://localhost:2834/builder.html) to test saved pins through DOM rebuilds. Screenshots and the owner dashboard come next. The decisions and open questions are in [docs/ROADMAP.md](docs/ROADMAP.md), and the build plan is in [\_PLANS/v1-build-plan.md](_PLANS/v1-build-plan.md), tracked as GitHub issues #1–#8. Code being borrowed from other projects is in [reference/](reference/README.md), which is read-only source material and is never run.
 
 ## Development
 
@@ -21,6 +21,8 @@ npm start
 `npm start` runs the Worker on <http://localhost:2833/> under `wrangler dev`, rebuilds the widget on every save under `src/widget`, and serves a stand-in host site from `demo/` on <http://localhost:2834/>, a separate origin, so the widget talks to the Worker cross-origin as it would on a real site. It opens the demo page once the Worker answers; `npm run start:no-open` (or `OPEN_BROWSER=0`) skips that. Ctrl-C stops all of it.
 
 `setup:local` applies local D1 migrations and seeds a demo account and site, allowing `http://localhost:2834`. It creates private, Git-ignored `.dev.vars` (the encryption key) and `.dev.vars.seed.json` (the site's signing credentials). Rerunning it preserves the site's keys and existing reports. Keep these files with the local database. The [ingestion API guide](docs/ingest.md) includes a signed curl smoke test.
+
+The demo server signs a fresh one-hour identity token for its demo reviewer whenever the page is loaded. The signing secret stays in the local server process. See [the embed guide](docs/embed.md) for the widget commands and host-site setup.
 
 | Command                                                                          | What it does                                                                       |
 | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |

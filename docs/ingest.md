@@ -1,6 +1,6 @@
 # Report ingestion
 
-Milestone 3 implements local report intake. The widget UI, dashboard, email notifications, attachment proxy, and orphan sweep are later milestones. Nothing in the local setup utilities creates cloud resources.
+Milestone 3 implements local report intake. Milestone 4 adds [the pin-and-submit widget](embed.md). The dashboard, email notifications, attachment proxy, and orphan sweep are later milestones. Nothing in the local setup utilities creates cloud resources.
 
 ## Run locally
 

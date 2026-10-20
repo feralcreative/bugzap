@@ -3,10 +3,10 @@
   // could drift from the types they claim to be and nothing else would notice.
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": ["ES2022"],
     "types": ["@cloudflare/vitest-plugin/types"],
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx"
   },
-  "include": [".", "../src/core", "../worker-configuration.d.ts"]
+  "include": ["core", "worker", "../src/core", "../worker-configuration.d.ts"]
 }

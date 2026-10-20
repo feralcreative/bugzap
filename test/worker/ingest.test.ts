@@ -567,3 +567,113 @@ describe('site secret encryption', () => {
     await expect(decryptSiteSecret('broken', env.SITE_KEK, publicKey)).rejects.toThrow()
   })
 })
+
+describe('saved pin reads', () => {
+  function read(
+    patch: Record<string, string> = {},
+    headers: Record<string, string> = {},
+    overrides: Partial<Env> = {},
+    method = 'GET',
+  ) {
+    const query = new URLSearchParams({ site: publicKey, page: `${ORIGIN}/editor/?secret=discard#fragment`, ...patch })
+    return app.fetch(
+      new Request(`http://bugzap.test/v1/pins?${query}`, {
+        method,
+        headers: { Origin: ORIGIN, Authorization: `Bearer ${token}`, ...headers },
+      }),
+      { ...env, PINS_READ: { limit: async () => ({ success: true }) }, ...overrides },
+      createExecutionContext(),
+    )
+  }
+  async function save(sub = 'reporter', state = 'pending', page = `${ORIGIN}/editor`, time = now()) {
+    const resolved = (await findIngestSite(env.DB, publicKey))!
+    const parsed = (await import('../../src/core/payload')).parseReportPayload(payload())
+    if (!parsed.ok) throw new Error(parsed.error)
+    const id = generateId()
+    await saveReport(env.DB, resolved, {
+      publicId: id,
+      claims: claims(sub),
+      payload: parsed.value,
+      pageKey: page,
+      diagnostics: {},
+      images: [],
+      now: time,
+    })
+    await env.DB.prepare('UPDATE reports SET state = ? WHERE public_id = ?').bind(state, id).run()
+    return id
+  }
+  it('returns only this reporter and page, excluding other published reports and private fields', async () => {
+    const own = await save()
+    await save('other', 'published')
+    await save('reporter', 'archived')
+    await save('reporter', 'spam')
+    await save('reporter', 'pending', `${ORIGIN}/elsewhere`)
+    const response = await read({ owner: 'true', reporter: 'other', account: '1' })
+    expect(response.status).toBe(200)
+    const body = await response.json<{ pins: Record<string, unknown>[]; truncated: boolean }>()
+    expect(body.pins).toHaveLength(1)
+    expect(body.pins[0]?.id).toBe(own)
+    expect(Object.keys(body.pins[0]!).sort()).toEqual(['anchor', 'body', 'id', 'kind', 'status', 'title'])
+    expect(body.truncated).toBe(false)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('access-control-allow-origin')).toBe(ORIGIN)
+  })
+  it('requires a header identity and strict site, page and origin gates', async () => {
+    await refusal(await read({ identity: token }, { Authorization: '' }), 401, 'invalid_identity')
+    await refusal(await read({}, { Authorization: 'Bearer broken' }), 401, 'invalid_identity')
+    await refusal(await read({}, { Origin: `${ORIGIN}/path` }), 403, 'origin_forbidden')
+    await refusal(await read({ page: 'https://elsewhere.example/editor' }), 400, 'invalid_page')
+    await refusal(await read({ site: secret }), 400, 'invalid_site_key')
+    await env.DB.prepare('UPDATE sites SET enabled = 0 WHERE id = ?').bind(site).run()
+    await refusal(await read(), 403, 'site_disabled')
+  })
+  it('isolates the same signed subject across accounts and sites and honors key rotation grace', async () => {
+    await save()
+    const otherAccount = (await env.DB.prepare('INSERT INTO accounts (public_id, name) VALUES (?, ?) RETURNING id')
+      .bind(generateId(), 'Other')
+      .first<{ id: number }>())!.id
+    const otherKey = generatePublicKey()
+    const otherSite = (await env.DB.prepare(
+      'INSERT INTO sites (account_id, public_key, name, secret_cipher) VALUES (?, ?, ?, ?) RETURNING id',
+    )
+      .bind(otherAccount, otherKey, 'Other', await encryptSiteSecret(secret, env.SITE_KEK, otherKey))
+      .first<{ id: number }>())!.id
+    await env.DB.prepare('INSERT INTO site_origins (account_id, site_id, origin) VALUES (?, ?, ?)')
+      .bind(otherAccount, otherSite, ORIGIN)
+      .run()
+    expect(await (await read({ site: otherKey })).json()).toMatchObject({ pins: [] })
+    const previous = generateSecretKey()
+    await env.DB.prepare('UPDATE sites SET previous_secret_cipher = ?, previous_secret_expires_at = ? WHERE id = ?')
+      .bind(await encryptSiteSecret(previous, env.SITE_KEK, publicKey), now() + 3600, site)
+      .run()
+    const previousToken = await signIdentity(claims(), previous)
+    expect((await read({}, { Authorization: `Bearer ${previousToken}` })).status).toBe(200)
+    await env.DB.prepare('UPDATE sites SET previous_secret_expires_at = ? WHERE id = ?')
+      .bind(now() - 1, site)
+      .run()
+    await refusal(await read({}, { Authorization: `Bearer ${previousToken}` }), 401, 'invalid_identity')
+  })
+  it('allows Authorization GET preflights and provides read-limit retry advice', async () => {
+    const headers = { 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization' }
+    expect((await read({}, headers, {}, 'OPTIONS')).status).toBe(204)
+    await refusal(
+      await read({}, { ...headers, 'Access-Control-Request-Headers': 'x-owner' }, {}, 'OPTIONS'),
+      403,
+      'origin_forbidden',
+    )
+    const limit = vi.fn(async () => ({ success: false }))
+    const response = await read({}, {}, { PINS_READ: { limit } })
+    await refusal(response, 429, 'pins_limited')
+    expect(response.headers.get('retry-after')).toBe('60')
+    expect(limit).toHaveBeenCalledWith({ key: JSON.stringify([publicKey, 'reporter']) })
+  })
+  it('caps the newest results and skips damaged historical anchors', async () => {
+    for (let n = 0; n < 101; n++) await save('reporter', 'pending', `${ORIGIN}/editor`, now() - (101 - n) * 3601)
+    const response = await read()
+    const body = await response.json<{ pins: unknown[]; truncated: boolean }>()
+    expect(body.pins).toHaveLength(100)
+    expect(body.truncated).toBe(true)
+    await env.DB.prepare('UPDATE pins SET anchor_json = ? WHERE account_id = ?').bind('{}', account).run()
+    expect(await (await read()).json()).toMatchObject({ pins: [], truncated: true })
+  })
+})
