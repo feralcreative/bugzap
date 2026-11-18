@@ -118,7 +118,7 @@ describe('magic-link sign-in', () => {
     expect(res.headers.get('content-security-policy')).toContain("default-src 'none'")
     expect(res.headers.get('content-security-policy')).toContain("frame-ancestors 'none'")
     expect(res.headers.get('cache-control')).toBe('no-store')
-    expect(res.headers.get('referrer-policy')).toBe('no-referrer')
+    expect(res.headers.get('referrer-policy')).toBe('same-origin')
     expect(res.headers.get('x-content-type-options')).toBe('nosniff')
     const css = await call('/dashboard.css')
     expect(css.headers.get('content-type')).toContain('text/css')
@@ -131,6 +131,25 @@ describe('magic-link sign-in', () => {
     }
     expect(mail).toHaveLength(0)
     expect(await count('SELECT count(*) AS n FROM login_tokens')).toBe(0)
+  })
+
+  it('accepts a browser post whose origin is withheld, but only when the browser calls it same-origin', async () => {
+    const post = (headers: Record<string, string>) =>
+      app.fetch(
+        new Request(`${BASE}/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...headers },
+          body: `email=${encodeURIComponent(OWNER)}`,
+        }),
+        { ...env, LOGIN_BURST: open },
+        createExecutionContext(),
+      )
+    expect((await post({ Origin: 'null', 'Sec-Fetch-Site': 'same-origin' })).status).toBe(200)
+    expect((await post({ 'Sec-Fetch-Site': 'same-origin' })).status).toBe(200)
+    for (const site of ['cross-site', 'same-site', 'none'])
+      expect((await post({ Origin: 'null', 'Sec-Fetch-Site': site })).status).toBe(403)
+    expect((await post({ Origin: 'https://evil.example', 'Sec-Fetch-Site': 'same-origin' })).status).toBe(403)
+    expect((await post({ Origin: 'null' })).status).toBe(403)
   })
 
   it('rejects a malformed address', async () => {

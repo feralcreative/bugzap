@@ -24,10 +24,10 @@ Owners sign in with a link sent to their email address. There are no passwords.
 - **Limits.** Link requests are limited to five a minute per IP address and per email address, and one address can hold at most five unused links.
 - **Accounts.** The first successful sign-in creates the owner's account. Requesting a link creates only a bare user row, so links requested for addresses nobody controls do not create tenants.
 - **Sessions.** A session lasts 30 days. The cookie is `__Host-bz_session` (`HttpOnly`, `Secure`, `SameSite=Lax`), holding a random token whose hash is stored. Plain-HTTP localhost uses `bz_session`, because browsers refuse the `__Host-` prefix without `Secure`. Signing out deletes the session on the server.
-- **Cross-site requests.** Every state change is a form post, refused unless its `Origin` header is the dashboard's own origin.
+- **Cross-site requests.** Every state change is a form post, refused unless its `Origin` header is the dashboard's own origin, or the browser withholds the origin and marks the request `Sec-Fetch-Site: same-origin`.
 - **Roles.** Only a membership with the `owner` role can use the dashboard. The `member` role exists in the schema and has no screens yet.
 
-Every page is sent with `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, and a Content Security Policy that allows the dashboard stylesheet and nothing else: no script, no frames, no other origin.
+Every page is sent with `Cache-Control: no-store`, `Referrer-Policy: same-origin`, and a Content Security Policy that allows the dashboard stylesheet and nothing else: no script, no frames, no other origin.
 
 ## Sites
 

@@ -44,21 +44,31 @@ async function currentUser(c: Ctx): Promise<SessionUser | null> {
   return user && isAllowed(user.email, c.env.SIGNUP_ALLOWLIST) ? user : null
 }
 
-// No script runs on any dashboard page, so the CSP allows none. `no-referrer`
-// matters on the confirm page, whose URL carries the login token.
+// No script runs on any dashboard page, so the CSP allows none. The referrer
+// policy keeps the confirm page's URL, which carries the login token, from ever
+// reaching another origin. It must not be `no-referrer`: under that policy a
+// browser sends `Origin: null` on the page's own form posts.
 const guard: MiddlewareHandler<App> = async (c, next) => {
   c.header('Cache-Control', 'no-store')
   c.header('X-Content-Type-Options', 'nosniff')
-  c.header('Referrer-Policy', 'no-referrer')
+  c.header('Referrer-Policy', 'same-origin')
   c.header(
     'Content-Security-Policy',
     "default-src 'none'; style-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
   )
   // Every state change is a same-origin form post. The session cookie is
   // SameSite=Lax, and this refuses anything a browser sends from another origin
-  // (or from a client that sends no Origin) before a handler reads the body.
-  if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && c.req.header('Origin') !== new URL(c.req.url).origin)
-    return c.html(<MessagePage title="Request refused" message="That form was not sent from this site." />, 403)
+  // (or from a client that says nothing about where it came from) before a
+  // handler reads the body. Sec-Fetch-Site is set by the browser and cannot be
+  // forged by a page; it covers a browser that withholds the origin as `null`.
+  if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
+    const origin = c.req.header('Origin')
+    const sameOrigin =
+      origin === new URL(c.req.url).origin ||
+      ((origin === undefined || origin === 'null') && c.req.header('Sec-Fetch-Site') === 'same-origin')
+    if (!sameOrigin)
+      return c.html(<MessagePage title="Request refused" message="That form was not sent from this site." />, 403)
+  }
   await next()
 }
 
