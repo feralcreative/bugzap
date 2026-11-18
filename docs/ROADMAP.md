@@ -8,7 +8,7 @@ A pin-drop feedback tool. A user or client clicks anything on a page, a pin drop
 
 ## Shape
 
-Decided 2026-10-18. The full build plan, with the schema, the APIs, and eight milestones (issues #1–#8), is [_PLANS/v1-build-plan.md](../_PLANS/v1-build-plan.md).
+Decided 2026-10-18. The full build plan, with the schema, the APIs, and eight milestones (issues #1–#8), is [\_PLANS/v1-build-plan.md](../_PLANS/v1-build-plan.md).
 
 - **An embeddable, framework-free script** that drops the pin, takes the screenshot, and posts the report to the hosted backend. It runs in a shadow DOM so it cannot clash with any host's CSS.
 - **A hosted backend on Cloudflare Workers**: D1 for data, R2 for screenshots, the widget served as a static asset, and an owner dashboard rendered by the same Worker. v1 ships the widget and the backend together.
