@@ -21,6 +21,15 @@ export const BODY_MAX = 4000
 /** Files a reporter may attach on top of the automatic screenshot. */
 export const UPLOAD_MAX = 2
 
+/** Sites one account may create, and origins one site may allow. Bounds on what a
+ *  single owner can store, not a pricing tier. */
+export const SITES_MAX = 10
+export const ORIGINS_MAX = 20
+export const SITE_NAME_MAX = 80
+
+/** How long a rotated-out signing secret keeps verifying, so open pages keep working. */
+export const SECRET_GRACE_S = 24 * 60 * 60
+
 // --- The enums ---------------------------------------------------------------
 //
 // Declared here as the single source, because D1 has no enum type: the migration's

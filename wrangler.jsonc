@@ -34,7 +34,9 @@
     },
   ],
 
-  "secrets": { "required": ["SITE_KEK"] },
+  // SIGNUP_ALLOWLIST: addresses and @domains that may sign in to the dashboard,
+  // comma-separated. Empty admits nobody.
+  "secrets": { "required": ["SITE_KEK", "SIGNUP_ALLOWLIST"] },
 
   "ratelimits": [
     {
@@ -46,6 +48,12 @@
       "name": "PINS_READ",
       "namespace_id": "2833002",
       "simple": { "limit": 60, "period": 60 },
+    },
+    {
+      // Sign-in link requests, counted per IP address and per email address.
+      "name": "LOGIN_BURST",
+      "namespace_id": "2833003",
+      "simple": { "limit": 5, "period": 60 },
     },
   ],
 

@@ -29,6 +29,7 @@ export default defineConfig({
               bindings: {
                 TEST_MIGRATIONS: await readD1Migrations('./migrations'),
                 SITE_KEK: randomBytes(32).toString('base64url'),
+                SIGNUP_ALLOWLIST: 'owner@allowed.example, @team.example',
               },
             },
           }),

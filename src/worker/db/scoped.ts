@@ -1,7 +1,7 @@
 import type { Diagnostics } from '../../core/diagnostics'
 import type { IdentityClaims } from '../../core/identity'
 import type { ReportPayload } from '../../core/payload'
-import { titleFrom } from '../../core/policy'
+import { ORIGINS_MAX, SITES_MAX, titleFrom } from '../../core/policy'
 import { parseSavedPin, PINS_MAX, type SavedPin } from '../../core/pins'
 
 export type IngestSite = {
@@ -181,4 +181,132 @@ export async function reporterPins(
     }
   }
   return { pins, truncated: results.length > PINS_MAX }
+}
+
+// --- Dashboard: an owner's sites ---------------------------------------------
+//
+// Every function below takes the account id from the session, never from the
+// request, and repeats it in each WHERE. A site key belonging to another account
+// therefore matches no row, and the dashboard answers 404 exactly as it would for
+// a key that does not exist.
+
+export type AccountSite = {
+  id: number
+  public_key: string
+  name: string
+  enabled: number
+  created_at: number
+  previous_secret_expires_at: number | null
+}
+
+export function accountSites(db: D1Database, accountId: number): Promise<(AccountSite & { origins: number })[]> {
+  return db
+    .prepare(
+      `SELECT s.id, s.public_key, s.name, s.enabled, s.created_at, s.previous_secret_expires_at,
+      (SELECT count(*) FROM site_origins o WHERE o.account_id = s.account_id AND o.site_id = s.id) AS origins
+    FROM sites s WHERE s.account_id = ? ORDER BY s.id`,
+    )
+    .bind(accountId)
+    .all<AccountSite & { origins: number }>()
+    .then((r) => r.results)
+}
+
+export async function accountSite(
+  db: D1Database,
+  accountId: number,
+  publicKey: string,
+): Promise<(AccountSite & { origins: string[] }) | null> {
+  const site = await db
+    .prepare(
+      `SELECT id, public_key, name, enabled, created_at, previous_secret_expires_at
+    FROM sites WHERE account_id = ? AND public_key = ?`,
+    )
+    .bind(accountId, publicKey)
+    .first<AccountSite>()
+  if (!site) return null
+  const { results } = await db
+    .prepare('SELECT origin FROM site_origins WHERE account_id = ? AND site_id = ? ORDER BY origin')
+    .bind(accountId, site.id)
+    .all<{ origin: string }>()
+  return { ...site, origins: results.map((r) => r.origin) }
+}
+
+/** False when the account is already at SITES_MAX; nothing is written then. */
+export async function createSite(
+  db: D1Database,
+  accountId: number,
+  input: { publicKey: string; name: string; secretCipher: string; origins: string[]; now: number },
+): Promise<boolean> {
+  const { publicKey, name, secretCipher, origins, now } = input
+  const results = await db.batch([
+    db
+      .prepare(
+        `INSERT INTO sites (account_id, public_key, name, secret_cipher, created_at)
+      SELECT ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM sites WHERE account_id = ?) < ?`,
+      )
+      .bind(accountId, publicKey, name, secretCipher, now, accountId, SITES_MAX),
+    // Resolved through the row above: when the limit refused it, these insert nothing.
+    ...origins.slice(0, ORIGINS_MAX).map((origin) =>
+      db
+        .prepare(
+          `INSERT OR IGNORE INTO site_origins (account_id, site_id, origin)
+        SELECT account_id, id, ? FROM sites WHERE account_id = ? AND public_key = ?`,
+        )
+        .bind(origin, accountId, publicKey),
+    ),
+  ])
+  return (results[0]?.meta.changes ?? 0) === 1
+}
+
+/**
+ * Replaces the signing secret and keeps the one it replaces valid until
+ * `graceUntil`, so pages already open keep reporting. Rotating again inside the
+ * grace period ends the older secret at once: only one previous secret is kept.
+ *
+ * Compare-and-swap on the secret that was current when this request read it. Of
+ * two rotations sent at once (a double-click), one wins and the other returns
+ * false, so no response ever shows as "new" a secret that is already the old one.
+ */
+export async function rotateSiteSecret(
+  db: D1Database,
+  accountId: number,
+  publicKey: string,
+  input: { secretCipher: string; graceUntil: number },
+): Promise<boolean> {
+  const current = await db
+    .prepare('SELECT secret_cipher FROM sites WHERE account_id = ? AND public_key = ?')
+    .bind(accountId, publicKey)
+    .first<{ secret_cipher: string }>()
+  if (!current) return false
+  const result = await db
+    .prepare(
+      `UPDATE sites SET previous_secret_cipher = secret_cipher, previous_secret_expires_at = ?, secret_cipher = ?
+    WHERE account_id = ? AND public_key = ? AND secret_cipher = ?`,
+    )
+    .bind(input.graceUntil, input.secretCipher, accountId, publicKey, current.secret_cipher)
+    .run()
+  return result.meta.changes === 1
+}
+
+/** Adding an origin the site already allows is a no-op. The count guard backs up
+ *  the handler's own check against two concurrent adds. */
+export async function addSiteOrigin(db: D1Database, accountId: number, publicKey: string, origin: string) {
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO site_origins (account_id, site_id, origin)
+    SELECT s.account_id, s.id, ? FROM sites s WHERE s.account_id = ? AND s.public_key = ?
+      AND (SELECT count(*) FROM site_origins o WHERE o.account_id = s.account_id AND o.site_id = s.id) < ?`,
+    )
+    .bind(origin, accountId, publicKey, ORIGINS_MAX)
+    .run()
+}
+
+export async function removeSiteOrigin(db: D1Database, accountId: number, publicKey: string, origin: string) {
+  await db
+    .prepare(
+      `DELETE FROM site_origins WHERE account_id = ? AND origin = ?
+      AND site_id = (SELECT id FROM sites WHERE account_id = ? AND public_key = ?)`,
+    )
+    .bind(accountId, origin, accountId, publicKey)
+    .run()
 }

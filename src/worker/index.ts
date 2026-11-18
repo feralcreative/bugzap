@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import dashboard from './dashboard'
 import ingest from './ingest'
 import { IngestError } from './ingest/body'
 import pins from './pins'
@@ -10,6 +11,8 @@ const app = new Hono<{ Bindings: Env }>()
 app.get('/healthz', (c) => c.text('ok'))
 app.route('/v1/reports', ingest)
 app.route('/v1/pins', pins)
+// The owner dashboard: server-rendered pages on the Worker's own origin.
+app.route('/', dashboard)
 
 app.onError((error, c) => {
   if (error instanceof IngestError)
