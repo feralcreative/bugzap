@@ -18,6 +18,7 @@
     "build:widget": "node utils/build-widget.js",
     "setup:local": "node utils/seed-site.js",
     "identity:local": "node utils/sign-identity.js",
+    "login:local": "node utils/mint-login-link.js",
     "types": "wrangler types",
     "typecheck": "tsc -p src/core && tsc -p src/widget && tsc -p src/worker && tsc -p test && tsc -p test/widget",
     "test": "vitest run",

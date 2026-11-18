@@ -3,7 +3,16 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
-import { assertIgnored, localKek, readSeed, SEED_FILE, toolbox, wranglerLocal, writePrivate } from './local-tools.js'
+import {
+  assertIgnored,
+  ensureLocalVar,
+  localKek,
+  readSeed,
+  SEED_FILE,
+  toolbox,
+  wranglerLocal,
+  writePrivate,
+} from './local-tools.js'
 
 try {
   const { values } = parseArgs({ options: { origin: { type: 'string' } } })
@@ -28,6 +37,9 @@ try {
     await writePrivate(SEED_FILE, JSON.stringify(seed, null, 2) + '\n')
     seed = await readSeed()
   }
+  // Lets the seeded owner sign in to the local dashboard; the link prints in the
+  // terminal running the Worker because MAIL_MODE is console.
+  const allowlisted = await ensureLocalVar('SIGNUP_ALLOWLIST', seed.email)
   const cipher = await core.encryptSiteSecret(seed.secret, kek, seed.site)
   const quote = (value) => "'" + value.replaceAll("'", "''") + "'"
   // Build the seed in a private temporary file: neither the signing key nor its
@@ -55,6 +67,11 @@ INSERT OR IGNORE INTO site_origins (account_id, site_id, origin)
   console.log(`Local site ready: ${seed.site}`)
   console.log(`Allowed origin: ${values.origin ? origin : seed.origin}`)
   console.log('Signing credentials are in .dev.vars.seed.json (private, Git-ignored).')
+  console.log(
+    allowlisted
+      ? `Dashboard sign-in: ${seed.email} (added to SIGNUP_ALLOWLIST in .dev.vars)`
+      : `Dashboard sign-in: ${seed.email}, if SIGNUP_ALLOWLIST in .dev.vars lists it. Setup leaves an existing list alone.`,
+  )
 } catch (error) {
   // Binding errors may contain SQL. Keep secrets out of the terminal on failure.
   console.error(error.code === 'ENOENT' ? 'Local setup could not find a required file.' : error.message)

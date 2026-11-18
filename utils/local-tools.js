@@ -2,7 +2,7 @@
 // maintaining a second implementation of signing or encryption in JavaScript.
 import { build } from 'esbuild'
 import { spawnSync } from 'node:child_process'
-import { chmod, readFile, writeFile } from 'node:fs/promises'
+import { appendFile, chmod, readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -77,6 +77,16 @@ export async function localKek() {
   if (!match) throw new Error('Set SITE_KEK in .dev.vars to a base64url-encoded 32-byte key, then rerun setup.')
   await chmod(VARS_FILE, 0o600)
   return match[1] ?? match[2] ?? match[3]
+}
+
+// Adds a setting to .dev.vars only when it is absent; a value someone already
+// chose is never rewritten. Call after localKek(), which creates the file.
+export async function ensureLocalVar(name, value) {
+  assertIgnored(VARS_FILE)
+  const vars = await readFile(VARS_FILE, 'utf8')
+  if (new RegExp(`^${name}\\s*=`, 'm').test(vars)) return false
+  await appendFile(VARS_FILE, `${vars.endsWith('\n') ? '' : '\n'}${name}=${value}\n`)
+  return true
 }
 
 export function wranglerLocal(args) {
