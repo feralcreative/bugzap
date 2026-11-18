@@ -1,6 +1,6 @@
 # Embedding Bugzap
 
-Milestones 4–6 support pinning an element, page-level feedback, sending reports with a screenshot, and displaying the reporter’s saved pins after reloads and DOM changes. Reports include the anchor, redacted diagnostics, and a masked screenshot or the reporter’s own upload. The owner dashboard is a later milestone.
+Milestones 4–6 support pinning an element, page-level feedback, sending reports with a screenshot, and displaying the reporter’s saved pins after reloads and DOM changes. Reports include the anchor, redacted diagnostics, and a masked screenshot or the reporter’s own upload. Site owners create sites and manage keys in [the dashboard](dashboard.md).
 
 ## Try the local demo
 
@@ -16,7 +16,7 @@ The Node demo server reads the private seed file and signs a one-hour token for 
 
 ## Add the embed to a host
 
-Create a site and allow its exact origin in the backend. For now this is the local seed utility; site management through the dashboard is milestone 7. The host's server must sign an HS256 identity token with its site's secret, covering `sub`, optional `email` and `name`, `iat`, and `exp`. Use a lifetime of 24 hours or less; the server caps it at seven days. The [identity helper and intake contract](ingest.md) describe the local signing flow.
+Create a site in [the dashboard](dashboard.md) and allow the host's exact origin there. Locally, the seed utility has already made one. The host's server must sign an HS256 identity token with its site's secret, covering `sub`, optional `email` and `name`, `iat`, and `exp`. Use a lifetime of 24 hours or less; the server caps it at seven days. The [identity helper and intake contract](ingest.md) describe the local signing flow.
 
 Render this snippet with the site's public key, a token signed for the signed-in user, and the address of the Bugzap Worker:
 

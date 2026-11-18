@@ -6,7 +6,7 @@ Built for Routeloop and every other Feral Creative project: a small embeddable s
 
 ## Status
 
-In development. Milestones 1–6 are implemented locally: the dev loop, shared core, report ingestion API, pin-and-submit widget, saved-pin re-anchoring, and masked screenshots with an upload fallback. Open the demo, click Feedback, choose a target, and send a report. Use [the builder demo](http://localhost:2834/builder.html) to test saved pins through DOM rebuilds and [the map demo](http://localhost:2834/map.html) to test screenshots. The owner dashboard comes next. The decisions and open questions are in [docs/ROADMAP.md](docs/ROADMAP.md), and the build plan is in [\_PLANS/v1-build-plan.md](_PLANS/v1-build-plan.md), tracked as GitHub issues #1–#8. Code being borrowed from other projects is in [reference/](reference/README.md), which is read-only source material and is never run.
+In development. Milestones 1–7 are implemented locally: the dev loop, shared core, report ingestion API, pin-and-submit widget, saved-pin re-anchoring, masked screenshots with an upload fallback, and [the owner dashboard's sign-in and site management](docs/dashboard.md). Open the demo, click Feedback, choose a target, and send a report. Use [the builder demo](http://localhost:2834/builder.html) to test saved pins through DOM rebuilds and [the map demo](http://localhost:2834/map.html) to test screenshots. The dashboard's reports inbox comes next; run `npm run login:local` for a sign-in link to <http://localhost:2833/>. The decisions and open questions are in [docs/ROADMAP.md](docs/ROADMAP.md), and the build plan is in [\_PLANS/v1-build-plan.md](_PLANS/v1-build-plan.md), tracked as GitHub issues #1–#8. Code being borrowed from other projects is in [reference/](reference/README.md), which is read-only source material and is never run.
 
 ## Development
 
@@ -32,6 +32,7 @@ The demo server signs a fresh one-hour identity token for its demo reviewer when
 | `npm run build:widget`                                                           | Builds `dist/assets/v1/bugzap.js` on its own                                       |
 | `npm run setup:local`                                                            | Applies migrations and seeds a site in local Wrangler storage                      |
 | `npm run identity:local -- --sub reviewer --output /private/tmp/bugzap-identity` | Writes a signed identity token to a new private file                               |
+| `npm run login:local`                                                            | Prints a one-time dashboard sign-in link for the seeded owner                      |
 
 ## Layout
 
