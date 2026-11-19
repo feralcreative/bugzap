@@ -1,6 +1,6 @@
 # Owner dashboard
 
-Milestone 7 adds sign-in and site management. The dashboard is server-rendered by the same Worker that takes reports, on the Worker's own origin, so it needs no CORS and no client script. The reports inbox, report detail, and the screenshot proxy are milestone 8.
+The dashboard is where a site's owner signs in, manages sites and keys, and reads and triages reports. It is server-rendered by the same Worker that takes reports, on the Worker's own origin, so it needs no CORS and no client script.
 
 ## Try it locally
 
@@ -10,7 +10,7 @@ npm start
 npm run login:local
 ```
 
-`setup:local` adds the seeded owner to `SIGNUP_ALLOWLIST` in `.dev.vars` when that setting is absent, and leaves an existing list alone. `login:local` prints a one-time sign-in link for that owner. Open it, press Sign in, and the seeded Local demo site is listed.
+`setup:local` applies any new migrations, adds the seeded owner to `SIGNUP_ALLOWLIST` in `.dev.vars` when that setting is absent, and leaves an existing list alone. `login:local` prints a one-time sign-in link for that owner. Open it, press Sign in, and the seeded Local demo site is listed.
 
 The real flow works too: open <http://localhost:2833/login>, enter the seeded address, and take the link from the terminal running the Worker. `MAIL_MODE` is `console`, so mail is printed, not sent.
 
@@ -38,6 +38,21 @@ Every page is sent with `Cache-Control: no-store`, `Referrer-Policy: same-origin
 
 Every query carries the account id from the session. A site key belonging to another account gets the same 404 page as a key that was never issued.
 
+## Reports
+
+Each site has an inbox at `/sites/<key>/reports`, newest first, 50 to a page, with a tab per state and a count on each.
+
+- **States.** Every report arrives in the Inbox (`pending`), private to its reporter and the account. Archived and Spam hide it from the reporter's page. Published is reserved for a future public board and changes nothing else yet.
+- **Detail.** The report page shows the reporter's words exactly as written, who sent it, the page, the pinned element (tag, label, text, and selector), the screenshot and attachments, and the redacted diagnostics. Everything a reporter supplied is rendered as text.
+- **Triage.** The owner can change the title, the state, the status the reporter is told, a priority from P0 to P3, and a private note. The reporter's words are never edited.
+- **Images.** The screenshot bucket is private. Images are served only through `/reports/<id>/images/<image>`, which needs the owner's session and sends `nosniff`, a sandboxing Content Security Policy, and `Cache-Control: private, no-store`.
+- **Open on page.** This opens the report's page with that report's pin drawn on it, even though the owner is not the reporter and may not be signed in to the host site. The link carries a token in the URL fragment that names one report and lasts 15 minutes. The widget removes it from the address bar and uses it to fetch that single pin. It works only on the report's own page, on an origin the site still allows; spam is never drawn. A whole-page report opens its page with no token. Two limits: the token is readable by the host page's own scripts for the moment before the widget removes it, as anything in a page's URL is, so it is scoped to one pin and 15 minutes; and reports store their page without its fragment, so on an app that routes on the fragment the link opens the app's root, not the screen the report was filed on.
+- **New-report mail.** When a report commits, each owner of the account is mailed the reporter's words and a link to the report. In `console` mode only the link is printed, so a reporter's words and name stay out of the logs.
+
+## Hourly sweep
+
+A cron trigger runs once an hour and removes expired sign-in links and sessions, user rows for addresses that asked for a link and never signed in, the stored copy of a rotated-out secret once its 24 hours are up, and screenshots in the bucket that no report claims and that are more than a day old. Each run handles at most 2,000 rows per table and 1,000 bucket objects, and carries on where it stopped. Locally, `curl http://localhost:2833/cdn-cgi/handler/scheduled` runs it once.
+
 ## Deploying
 
-A deployed Worker needs the `SIGNUP_ALLOWLIST` secret alongside `SITE_KEK`. Until a sending domain exists, `MAIL_MODE` stays `console` and the sign-in link is read from the Worker's logs (`wrangler tail`), which only the Cloudflare account owner can see. Switching to real mail needs SPF and DKIM records on the sending domain.
+A deployed Worker needs the `SIGNUP_ALLOWLIST` secret alongside `SITE_KEK`, both migrations applied to the remote database, and the cron trigger in `wrangler.jsonc`. Until a sending domain exists, `MAIL_MODE` stays `console` and sign-in links and new-report notices are read from the Worker's logs (`wrangler tail`), which only the Cloudflare account owner can see. Switching to real mail needs SPF and DKIM records on the sending domain.

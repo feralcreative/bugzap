@@ -39,6 +39,10 @@ Serialize template values as JSON and escape `<` as `\u003c` before placing them
 
 For hosts with a Content Security Policy, allow the Worker in `script-src` and `connect-src`. The widget copies the embed script's CSP nonce onto its shadow-root stylesheet, so put the host's current nonce on the embed script when nonce-based styles are required. Styles and controls live in an open shadow root. The UI uses a manual top-layer popover when available and falls back to a fixed layer. It builds DOM nodes directly and does not use `innerHTML`.
 
+## Owner view links
+
+When a site's owner presses Open on page in the dashboard, the page opens with `#bugzap-view=…` at the end of its URL. The widget removes that from the address bar as it starts and shows the one pin the token names, whether or not `identity` was given. Hosts need to do nothing, and a single-page app that routes on the fragment keeps the rest of its fragment.
+
 ## Commands
 
 The queue works before or after the async script loads. Calls return without throwing into the host page. Register events before `init` if you need the initial `ready` event.
