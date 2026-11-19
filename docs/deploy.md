@@ -1,13 +1,13 @@
 # Deploying
 
-Bugzap deploys as a Cloudflare Worker with Wrangler, to two environments on the Feral Creative Cloudflare account. Both run on `workers.dev` for now; a custom domain and a mail sending domain are separate, later decisions, and nothing here touches DNS.
+Bugzap deploys as a Cloudflare Worker with Wrangler, to two environments on the Feral Creative Cloudflare account. Each is a custom domain in the `bugzap.app` zone: staging at `stage.bugzap.app` and production at `bugzap.app`. Deploying an environment creates and manages the one DNS record for its hostname; nothing else in the zone is touched. A mail sending domain is a separate, later decision.
 
 | Environment | Script                    | Worker           | Database            | Bucket                    |
 | ----------- | ------------------------- | ---------------- | ------------------- | ------------------------- |
 | Staging     | `./utils/deploy/stage.sh` | `bugzap-staging` | `bugzap-staging`    | `bugzap-shots-staging`    |
 | Production  | `./utils/deploy/prod.sh`  | `bugzap`         | `bugzap-production` | `bugzap-shots-production` |
 
-Staging was first deployed on 2026-11-18 and answers at <https://bugzap-staging.ziad-af.workers.dev>. Production does not exist yet. One thing the first setup turned up: R2 has to be enabled once for the account in the Cloudflare dashboard before any bucket can be created, and when `wrangler d1 create` or `wrangler r2 bucket create` offers to add the binding to the config on your behalf, answer no, because it rewrites `wrangler.jsonc` and adds a stray top-level binding.
+Staging was first deployed on 2026-11-18 and answers at <https://stage.bugzap.app>. Its `workers.dev` address, <https://bugzap-staging.ziad-af.workers.dev>, is still on until the custom domain has been used for a sign-in; turn it off by setting `workers_dev` to `false` under `env.staging`. Production does not exist yet. One thing the first setup turned up: R2 has to be enabled once for the account in the Cloudflare dashboard before any bucket can be created, and when `wrangler d1 create` or `wrangler r2 bucket create` offers to add the binding to the config on your behalf, answer no, because it rewrites `wrangler.jsonc` and adds a stray top-level binding.
 
 ## The scripts
 

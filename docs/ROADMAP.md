@@ -31,13 +31,13 @@ Routeloop's feedback subsystem is the reference implementation for the intake si
 
 Bugzap, chosen 2026-10-18. A bug bomb clears the whole room and a zap hits one bug, which is what a pin does. The bare `bugzap` npm name was free on 2026-10-18; bugzap.com and bugzap.dev are registered.
 
-Domain still open: bugzap.app or bugzap.io, both with no nameservers on 2026-10-18 (probably unregistered, not confirmed with a registrar). The lean is .app, because .io's future depends on the Chagos Islands handover to Mauritius. Bugbomb (.dev and .io) was the runner-up.
+Domain: bugzap.app, settled 2026-11-18. Staging is `stage.bugzap.app` and production is the apex. The other candidate was bugzap.io, passed over because .io's future depends on the Chagos Islands handover to Mauritius. Bugbomb (.dev and .io) was the runner-up name.
 
 Rejected: client-feedback vocabulary (redline, markup, punchlist, and so on) and fine-tuning vocabulary. Avoid trademarks: Sharpie, Post-it, and Roach Motel were floated and are all brands.
 
 ## Open questions
 
-- Domain: bugzap.app or bugzap.io. v1 runs on `workers.dev` until then, and the email sending domain waits on the same decision, since both are DNS changes.
+- Email sending domain: mail stays in console mode until SPF and DKIM records exist for a sending domain, which is a DNS change.
 - Screenshot retention: proposed as an R2 lifecycle rule at 180 days.
 - Query strings: proposed as stripped by default, with a per-site list of parameters to keep.
 - Sites with no login of their own: proposed as reviewer invites over a magic link, after v1.
