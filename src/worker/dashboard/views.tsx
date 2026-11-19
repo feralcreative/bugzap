@@ -105,7 +105,7 @@ const day = (seconds: number) => new Date(seconds * 1000).toISOString().slice(0,
 
 export function SitesPage(props: {
   user: SessionUser
-  sites: (AccountSite & { origins: number })[]
+  sites: (AccountSite & { origins: number; pending: number })[]
   error?: string
   draft?: { name: string; origins: string }
 }) {
@@ -120,9 +120,10 @@ export function SitesPage(props: {
           <ul class="rows">
             {sites.map((site) => (
               <li>
-                <a href={`/sites/${site.public_key}`}>{site.name}</a>
+                <a href={`/sites/${site.public_key}/reports`}>{site.name}</a>
                 <span class="meta">
-                  {site.origins === 1 ? '1 origin' : `${site.origins} origins`} · created {day(site.created_at)}
+                  {site.pending === 1 ? '1 new report' : `${site.pending} new reports`} ·{' '}
+                  <a href={`/sites/${site.public_key}`}>Keys and origins</a>
                 </span>
               </li>
             ))}
@@ -191,7 +192,7 @@ export function SitePage(props: {
   return (
     <Page title={site.name} user={user}>
       <p>
-        <a href="/sites">← Sites</a>
+        <a href="/sites">← Sites</a> · <a href={`${base}/reports`}>Reports</a>
       </p>
       <h1>{site.name}</h1>
 

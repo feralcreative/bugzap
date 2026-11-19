@@ -27,6 +27,10 @@ export const SITES_MAX = 10
 export const ORIGINS_MAX = 20
 export const SITE_NAME_MAX = 80
 
+/** The owner's private note on a report, and the longest title they may give it. */
+export const OWNER_NOTE_MAX = 2000
+export const OWNER_TITLE_MAX = 120
+
 /** How long a rotated-out signing secret keeps verifying, so open pages keep working. */
 export const SECRET_GRACE_S = 24 * 60 * 60
 

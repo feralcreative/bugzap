@@ -1,5 +1,5 @@
 /** @jsxImportSource hono/jsx */
-import { type Context, Hono, type MiddlewareHandler } from 'hono'
+import { Hono, type MiddlewareHandler } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { generateId, generatePublicKey, generateSecretKey, isPublicKey } from '../../core/ids'
@@ -19,14 +19,12 @@ import {
 } from '../db/auth'
 import { accountSite, accountSites, addSiteOrigin, createSite, removeSiteOrigin, rotateSiteSecret } from '../db/scoped'
 import { sendMail } from '../mail'
+import { type App, type Ctx, now } from './context'
+import { addReportRoutes } from './reports'
 import { dashboardCss } from './style'
 import { ConfirmPage, LinkSentPage, LoginPage, MessagePage, SitePage, SitesPage } from './views'
 
-type App = { Bindings: Env; Variables: { user: SessionUser } }
-type Ctx = Context<App>
-
 const dashboard = new Hono<App>()
-const now = () => Math.floor(Date.now() / 1000)
 
 // `__Host-` pins the cookie to this exact host over HTTPS with Path=/, so no
 // sibling subdomain can set or shadow it. Browsers refuse that prefix without
@@ -54,7 +52,7 @@ const guard: MiddlewareHandler<App> = async (c, next) => {
   c.header('Referrer-Policy', 'same-origin')
   c.header(
     'Content-Security-Policy',
-    "default-src 'none'; style-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
   )
   // Every state change is a same-origin form post. The session cookie is
   // SameSite=Lax, and this refuses anything a browser sends from another origin
@@ -84,11 +82,11 @@ const limitBody = bodyLimit({
   onError: (c) => c.html(<MessagePage title="Too large" message="That form was too large." />, 413),
 })
 
-for (const path of ['/', '/login', '/login/*', '/logout', '/sites', '/sites/*']) {
+for (const path of ['/', '/login', '/login/*', '/logout', '/sites', '/sites/*', '/reports/*']) {
   dashboard.use(path, guard)
   dashboard.use(path, limitBody)
 }
-for (const path of ['/', '/sites', '/sites/*']) dashboard.use(path, signedIn)
+for (const path of ['/', '/sites', '/sites/*', '/reports/*']) dashboard.use(path, signedIn)
 
 dashboard.get('/dashboard.css', (c) => {
   c.header('Content-Type', 'text/css; charset=utf-8')
@@ -324,6 +322,8 @@ dashboard.post('/sites/:key/origins/remove', async (c) => {
   await removeSiteOrigin(c.env.DB, c.get('user').accountId, site.public_key, await field(c, 'origin'))
   return c.redirect(`/sites/${site.public_key}`, 303)
 })
+
+addReportRoutes(dashboard)
 
 dashboard.onError((error, c) => {
   // Never the error itself: a binding error can carry SQL and bound values.

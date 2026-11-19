@@ -416,3 +416,131 @@ describe('host failure isolation', () => {
     expect(button('Feedback')).toBeDefined()
   })
 })
+
+describe('an owner’s view link', () => {
+  const VIEW = 'bzv1.ABCDEFGHIJKLMNOPQRSTUV.1900000000.c2lnbmF0dXJl'
+  const pin = {
+    id: 'ABCDEFGHIJKLMNOPQRSTUV',
+    kind: 'bug',
+    status: 'new',
+    title: 'Save is broken',
+    body: 'The save button does nothing.',
+    anchor: {
+      v: 1,
+      attrs: [{ depth: 0, name: 'data-bugzap-id', value: 'save' }],
+      selector: '[data-bugzap-id="save"]',
+      tag: 'button',
+      rect: { x: 20, y: 40, w: 100, h: 30 },
+      offset: { fx: 0.5, fy: 0.5 },
+      page: { x: 70, y: 55 },
+      viewport: { w: 1024, h: 768, dpr: 1, sx: 0, sy: 0 },
+    },
+  }
+  function stubView(viewStatus = 200) {
+    const calls: { url: string; authorization: string | null }[] = []
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      calls.push({ url, authorization: new Headers(init?.headers).get('Authorization') })
+      if (url.includes('/v1/pins/view'))
+        return Promise.resolve(new Response(JSON.stringify({ ok: viewStatus === 200, pin }), { status: viewStatus }))
+      return Promise.resolve(new Response(JSON.stringify({ ok: true, pins: [], truncated: false })))
+    })
+    return calls
+  }
+  afterEach(() => {
+    history.replaceState(null, '', location.pathname)
+  })
+
+  it('takes the token out of the address bar and opens that one pin, with no identity', async () => {
+    target()
+    const calls = stubView()
+    location.hash = `#section=2&bugzap-view=${VIEW}`
+    api('init', { site: SITE })
+    expect(location.hash).toBe('#section=2')
+    await vi.waitFor(() => expect(shadow().querySelector('.report-body')?.textContent).toBe(pin.body))
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.url).toContain(`${API}/v1/pins/view?site=${SITE}&page=`)
+    expect(calls[0]!.url).not.toContain('bzv1')
+    expect(calls[0]!.authorization).toBe(`View ${VIEW}`)
+    expect(shadow().querySelectorAll('.saved-pin')).toHaveLength(1)
+    // Closing it does not reopen it on the next repaint, and no launcher appears
+    // for a visitor the host never identified.
+    button('Close report').click()
+    window.dispatchEvent(new Event('resize'))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(shadow().querySelector('.report-body')?.closest('[hidden]')).not.toBeNull()
+    expect(() => button('Feedback')).toThrow()
+  })
+
+  it('keeps a reporter’s own pins working when the view token is refused', async () => {
+    const calls = stubView(401)
+    location.hash = `#bugzap-view=${VIEW}`
+    ready()
+    expect(location.hash).toBe('')
+    await vi.waitFor(() => expect(calls).toHaveLength(2))
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(shadow().querySelectorAll('.saved-pin')).toHaveLength(0)
+    expect(button('Feedback')).toBeTruthy()
+  })
+
+  it('shows the viewed pin even when the reporter identity is refused', async () => {
+    target()
+    vi.stubGlobal('fetch', (input: RequestInfo | URL) =>
+      Promise.resolve(
+        String(input).includes('/v1/pins/view')
+          ? new Response(JSON.stringify({ ok: true, pin }))
+          : new Response(JSON.stringify({ ok: false, error: 'invalid_identity' }), { status: 401 }),
+      ),
+    )
+    location.hash = `#bugzap-view=${VIEW}`
+    ready()
+    await vi.waitFor(() => expect(shadow().querySelector('.report-body')?.textContent).toBe(pin.body))
+  })
+
+  it('drops the token on logout and on a fresh init, so it cannot follow into another session', async () => {
+    target()
+    const calls = stubView()
+    location.hash = `#bugzap-view=${VIEW}`
+    api('init', { site: SITE })
+    await vi.waitFor(() => expect(shadow().querySelectorAll('.saved-pin')).toHaveLength(1))
+    api('logout')
+    api('identify', 'a-different-reporter-token')
+    await vi.waitFor(() => expect(calls.filter((c) => !c.url.includes('/view'))).toHaveLength(1))
+    api('init', { site: SITE, identity: TOKEN })
+    await vi.waitFor(() => expect(calls.filter((c) => !c.url.includes('/view'))).toHaveLength(2))
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(calls.filter((c) => c.url.includes('/view'))).toHaveLength(1)
+    expect(shadow().querySelectorAll('.saved-pin')).toHaveLength(0)
+  })
+
+  it('leaves a busy visitor alone: the pin arrives as a marker and never opens later', async () => {
+    target()
+    let release!: (response: Response) => void
+    vi.stubGlobal('fetch', (input: RequestInfo | URL) =>
+      String(input).includes('/v1/pins/view')
+        ? new Promise<Response>((resolve) => {
+            release = resolve
+          })
+        : Promise.resolve(new Response(JSON.stringify({ ok: true, pins: [], truncated: false }))),
+    )
+    location.hash = `#bugzap-view=${VIEW}`
+    ready()
+    button('Feedback').click()
+    button('Report this page').click()
+    release(new Response(JSON.stringify({ ok: true, pin })))
+    await vi.waitFor(() => expect(shadow().querySelectorAll('.saved-pin')).toHaveLength(1))
+    expect(textArea().closest('[hidden]')).toBeNull()
+    button('Cancel').click()
+    window.dispatchEvent(new Event('resize'))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(shadow().querySelector('.report-body')?.closest('[hidden]')).not.toBeNull()
+  })
+
+  it('ignores a fragment that is not a view token', () => {
+    const calls = stubView()
+    location.hash = '#notbugzap-view=abc'
+    api('init', { site: SITE })
+    expect(location.hash).toBe('#notbugzap-view=abc')
+    expect(calls).toHaveLength(0)
+  })
+})

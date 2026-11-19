@@ -1,7 +1,14 @@
 import type { Diagnostics } from '../../core/diagnostics'
 import type { IdentityClaims } from '../../core/identity'
 import type { ReportPayload } from '../../core/payload'
-import { ORIGINS_MAX, SITES_MAX, titleFrom } from '../../core/policy'
+import {
+  ORIGINS_MAX,
+  type ReportKind,
+  type ReportState,
+  type ReportStatus,
+  SITES_MAX,
+  titleFrom,
+} from '../../core/policy'
 import { parseSavedPin, PINS_MAX, type SavedPin } from '../../core/pins'
 
 export type IngestSite = {
@@ -199,15 +206,19 @@ export type AccountSite = {
   previous_secret_expires_at: number | null
 }
 
-export function accountSites(db: D1Database, accountId: number): Promise<(AccountSite & { origins: number })[]> {
+export function accountSites(
+  db: D1Database,
+  accountId: number,
+): Promise<(AccountSite & { origins: number; pending: number })[]> {
   return db
     .prepare(
       `SELECT s.id, s.public_key, s.name, s.enabled, s.created_at, s.previous_secret_expires_at,
-      (SELECT count(*) FROM site_origins o WHERE o.account_id = s.account_id AND o.site_id = s.id) AS origins
+      (SELECT count(*) FROM site_origins o WHERE o.account_id = s.account_id AND o.site_id = s.id) AS origins,
+      (SELECT count(*) FROM reports r WHERE r.account_id = s.account_id AND r.site_id = s.id AND r.state = 'pending') AS pending
     FROM sites s WHERE s.account_id = ? ORDER BY s.id`,
     )
     .bind(accountId)
-    .all<AccountSite & { origins: number }>()
+    .all<AccountSite & { origins: number; pending: number }>()
     .then((r) => r.results)
 }
 
@@ -309,4 +320,187 @@ export async function removeSiteOrigin(db: D1Database, accountId: number, public
     )
     .bind(accountId, origin, accountId, publicKey)
     .run()
+}
+
+// --- Dashboard: an owner's reports ----------------------------------------------
+//
+// The same rule as the sites above: the account id comes from the session and is
+// in every WHERE, so a report id from another account matches nothing.
+
+export const INBOX_PAGE = 50
+
+export type InboxReport = {
+  public_id: string
+  kind: ReportKind
+  state: ReportState
+  status: ReportStatus
+  title: string
+  priority: number | null
+  page_url: string
+  created_at: number
+  reporter_name: string | null
+  reporter_email: string | null
+  pinned: number
+  shots: number
+}
+
+/** How many reports the site holds in each state, for the inbox tabs. */
+export async function reportCounts(db: D1Database, accountId: number, siteId: number) {
+  const { results } = await db
+    .prepare('SELECT state, count(*) AS n FROM reports WHERE account_id = ? AND site_id = ? GROUP BY state')
+    .bind(accountId, siteId)
+    .all<{ state: ReportState; n: number }>()
+  const counts: Record<ReportState, number> = { pending: 0, published: 0, archived: 0, spam: 0 }
+  for (const row of results) counts[row.state] = row.n
+  return counts
+}
+
+/**
+ * Newest first, one page at a time. `before` is the public id of the last report
+ * on the previous page: paging by position would repeat or skip rows whenever a
+ * report arrives or is moved while the owner is reading. Asks for one row more
+ * than a page so the caller knows whether another page exists without a count.
+ */
+export async function siteReports(
+  db: D1Database,
+  accountId: number,
+  siteId: number,
+  input: { state: ReportState; before?: string },
+): Promise<{ reports: InboxReport[]; more: boolean }> {
+  const { results } = await db
+    .prepare(
+      `SELECT r.public_id, r.kind, r.state, r.status, r.title, r.priority, r.page_url, r.created_at,
+      p.name AS reporter_name, p.email AS reporter_email,
+      EXISTS (SELECT 1 FROM pins x WHERE x.account_id = r.account_id AND x.report_id = r.id) AS pinned,
+      (SELECT count(*) FROM attachments a WHERE a.account_id = r.account_id AND a.report_id = r.id) AS shots
+    FROM reports r JOIN reporters p ON p.account_id = r.account_id AND p.site_id = r.site_id AND p.id = r.reporter_id
+    WHERE r.account_id = ?1 AND r.site_id = ?2 AND r.state = ?3
+      AND (?4 IS NULL OR r.id < (SELECT id FROM reports WHERE account_id = ?1 AND site_id = ?2 AND public_id = ?4))
+    ORDER BY r.id DESC LIMIT ?5`,
+    )
+    .bind(accountId, siteId, input.state, input.before ?? null, INBOX_PAGE + 1)
+    .all<InboxReport>()
+  return { reports: results.slice(0, INBOX_PAGE), more: results.length > INBOX_PAGE }
+}
+
+export type ReportAttachment = {
+  public_id: string
+  role: 'screenshot' | 'attachment'
+  mime: string
+  bytes: number
+  width: number
+  height: number
+}
+
+export type ReportDetail = InboxReport & {
+  id: number
+  site_id: number
+  site_key: string
+  site_name: string
+  body: string
+  owner_note: string | null
+  page_key: string
+  page_title: string | null
+  screenshot_mode: string
+  screenshot_failed: string | null
+  updated_at: number
+  reporter_subject: string
+  anchor_json: string | null
+  diagnostics_json: string | null
+  attachments: ReportAttachment[]
+}
+
+export async function accountReport(db: D1Database, accountId: number, publicId: string): Promise<ReportDetail | null> {
+  const report = await db
+    .prepare(
+      `SELECT r.id, r.site_id, r.public_id, r.kind, r.state, r.status, r.title, r.priority, r.body, r.owner_note,
+      r.page_url, r.page_key, r.page_title, r.screenshot_mode, r.screenshot_failed, r.created_at, r.updated_at,
+      s.public_key AS site_key, s.name AS site_name,
+      p.name AS reporter_name, p.email AS reporter_email, p.subject AS reporter_subject,
+      x.anchor_json, d.data_json AS diagnostics_json
+    FROM reports r JOIN sites s ON s.account_id = r.account_id AND s.id = r.site_id
+    JOIN reporters p ON p.account_id = r.account_id AND p.site_id = r.site_id AND p.id = r.reporter_id
+    LEFT JOIN pins x ON x.account_id = r.account_id AND x.site_id = r.site_id AND x.report_id = r.id
+    LEFT JOIN diagnostics d ON d.account_id = r.account_id AND d.site_id = r.site_id AND d.report_id = r.id
+    WHERE r.account_id = ? AND r.public_id = ?`,
+    )
+    .bind(accountId, publicId)
+    .first<Omit<ReportDetail, 'attachments' | 'pinned' | 'shots'>>()
+  if (!report) return null
+  const { results } = await db
+    .prepare(
+      `SELECT public_id, role, mime, bytes, width, height FROM attachments
+    WHERE account_id = ? AND report_id = ? ORDER BY role DESC, id`,
+    )
+    .bind(accountId, report.id)
+    .all<ReportAttachment>()
+  return { ...report, pinned: report.anchor_json ? 1 : 0, shots: results.length, attachments: results }
+}
+
+/** The owner's side of a report: where it sits, what the reporter is told, and
+ *  the owner's own notes. The reporter's words are never edited. */
+export async function updateReport(
+  db: D1Database,
+  accountId: number,
+  publicId: string,
+  input: {
+    state: ReportState
+    status: ReportStatus
+    priority: number | null
+    title: string
+    ownerNote: string | null
+    now: number
+  },
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE reports SET state = ?, status = ?, priority = ?, title = ?, owner_note = ?, updated_at = ?
+    WHERE account_id = ? AND public_id = ?`,
+    )
+    .bind(input.state, input.status, input.priority, input.title, input.ownerNote, input.now, accountId, publicId)
+    .run()
+  return result.meta.changes === 1
+}
+
+/** The R2 key for one image of one report, or null. Both ids must belong to the
+ *  account: the key is never built from anything the request supplied. */
+export function reportAttachment(
+  db: D1Database,
+  accountId: number,
+  reportPublicId: string,
+  attachmentPublicId: string,
+) {
+  return db
+    .prepare(
+      `SELECT a.object_key, a.mime, a.bytes FROM attachments a
+    JOIN reports r ON r.account_id = a.account_id AND r.site_id = a.site_id AND r.id = a.report_id
+    WHERE a.account_id = ? AND r.public_id = ? AND a.public_id = ?`,
+    )
+    .bind(accountId, reportPublicId, attachmentPublicId)
+    .first<{ object_key: string; mime: string; bytes: number }>()
+}
+
+/** One report's pin, for an owner's view token. The page must match as well as
+ *  the site: a token minted for one page shows nothing on another. Spam is never
+ *  drawn on a host page. */
+export async function viewedPin(
+  db: D1Database,
+  site: IngestSite,
+  reportPublicId: string,
+  pageKey: string,
+): Promise<SavedPin | null> {
+  const row = await db
+    .prepare(
+      `SELECT r.public_id AS id, r.kind, r.status, r.title, r.body, p.anchor_json
+    FROM reports r JOIN pins p ON p.account_id = r.account_id AND p.site_id = r.site_id AND p.report_id = r.id
+    WHERE r.account_id = ? AND r.site_id = ? AND r.public_id = ? AND r.page_key = ? AND r.state != 'spam'`,
+    )
+    .bind(site.account_id, site.id, reportPublicId, pageKey)
+    .first<{ id: string; kind: string; status: string; title: string; body: string; anchor_json: string }>()
+  if (!row) return null
+  try {
+    return parseSavedPin({ ...row, anchor: JSON.parse(row.anchor_json) })
+  } catch {
+    return null
+  }
 }

@@ -12,62 +12,7 @@ import { LOGIN_TOKEN_TTL_S, LOGIN_TOKENS_MAX, SESSION_TTL_S } from '../../src/wo
 import { findIngestSite } from '../../src/worker/db/scoped'
 import { siteIdentity } from '../../src/worker/identity'
 
-const BASE = 'http://bugzap.test'
-const OWNER = 'owner@allowed.example' // On the allowlist in vitest.config.ts.
-const now = () => Math.floor(Date.now() / 1000)
-const open = { limit: async () => ({ success: true }) }
-
-type Options = {
-  method?: string
-  form?: Record<string, string>
-  cookie?: string
-  origin?: string | null
-  base?: string
-  env?: Partial<Env>
-}
-
-function call(path: string, options: Options = {}) {
-  const base = options.base ?? BASE
-  const headers = new Headers()
-  if (options.cookie) headers.set('Cookie', options.cookie)
-  const method = options.method ?? (options.form ? 'POST' : 'GET')
-  if (method !== 'GET' && options.origin !== null) headers.set('Origin', options.origin ?? base)
-  let body: string | undefined
-  if (method !== 'GET') {
-    headers.set('Content-Type', 'application/x-www-form-urlencoded')
-    body = new URLSearchParams(options.form ?? {}).toString()
-  }
-  return app.fetch(
-    new Request(base + path, { method, headers, body, redirect: 'manual' }),
-    { ...env, LOGIN_BURST: open, INGEST_BURST: open, ...options.env },
-    createExecutionContext(),
-  )
-}
-
-/** A signed-in owner with their own account, made directly in the database. */
-async function owner(email = `${generateId().toLowerCase()}@team.example`) {
-  const accountId = (await env.DB.prepare('INSERT INTO accounts (public_id, name) VALUES (?, ?) RETURNING id')
-    .bind(generateId(), 'Test account')
-    .first<{ id: number }>())!.id
-  const userId = (await env.DB.prepare('INSERT INTO users (email) VALUES (?) RETURNING id')
-    .bind(email)
-    .first<{ id: number }>())!.id
-  await env.DB.prepare('INSERT INTO memberships (account_id, user_id) VALUES (?, ?)').bind(accountId, userId).run()
-  const token = generateToken()
-  await env.DB.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
-    .bind(await hashToken(token), userId, now() + SESSION_TTL_S)
-    .run()
-  return { accountId, userId, email, token, cookie: `bz_session=${token}` }
-}
-
-const secretIn = (html: string) => /bz_sk_[A-Za-z0-9]{32}/.exec(html)?.[0]
-const keyIn = (html: string) => /bz_pk_[A-Za-z0-9]{22}/.exec(html)?.[0]
-
-async function newSite(cookie: string, form: Record<string, string> = {}) {
-  const res = await call('/sites', { cookie, form: { name: 'Docs', origins: 'https://docs.example', ...form } })
-  const html = await res.text()
-  return { res, html, key: keyIn(html)!, secret: secretIn(html)! }
-}
+import { BASE, call, newSite, now, open, owner, OWNER, secretIn } from './helpers'
 
 let mail: string[]
 beforeEach(async () => {

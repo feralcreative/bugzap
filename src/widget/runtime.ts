@@ -30,6 +30,9 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
   let epoch = 0
   let destroyed = false
   let previousFocus: HTMLElement | null = null
+  let viewToken: string | undefined
+  let viewing: string | null = null
+  let viewShown = false
   const shots = createShots(win, defaultApi, nonce, (state) => view?.shot(state))
   const emit = (event: WidgetEvent, detail: Readonly<Record<string, unknown>> = {}) => {
     for (const listener of listeners.get(event) ?? []) guard(listener)(Object.freeze({ ...detail }))
@@ -119,14 +122,65 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
     } else selection()
     emit('open')
   }
+  const showSaved = (id: string) => {
+    const placement = saved?.get(id)
+    if (!placement || phase !== 'idle') return false
+    previousFocus = win.document.activeElement instanceof HTMLElement ? win.document.activeElement : null
+    phase = 'detail'
+    view?.show(phase, true)
+    view?.detail(placement)
+    return true
+  }
+  // An owner arriving from the dashboard's "Open on page" carries a view token in
+  // the fragment. Take it out of the address bar at once, so it is not bookmarked,
+  // shared, or read by the host's own scripts later.
+  // The token is an owner's, not the visitor's in general: it is dropped when the
+  // host signs the visitor out or starts the widget over, so it can never follow
+  // into a different person's session on the same page.
+  const dropViewToken = () => {
+    viewToken = undefined
+    viewing = null
+    viewShown = false
+  }
+  const takeViewToken = () => {
+    const match = /(^#|&)bugzap-view=([\w.-]{1,120})/.exec(win.location.hash)
+    if (!match) return
+    viewToken = match[2]
+    const rest = win.location.hash
+      .replace(match[0], match[1] === '#' ? '#' : '')
+      .replace(/^#&/, '#')
+      .replace(/^#$/, '')
+    win.history.replaceState(win.history.state, '', win.location.pathname + win.location.search + rest)
+  }
   const startPins = () => {
     saved?.dispose()
     saved = null
-    if (config?.identity)
+    if (config?.identity || viewToken)
       saved = safe(
         () =>
-          watchPins(win, config!.api!, config!.site, config!.identity!, (placements, truncated) =>
-            view?.savedPins(placements, truncated),
+          watchPins(
+            win,
+            config!.api!,
+            config!.site,
+            config!.identity,
+            (placements, truncated) => {
+              view?.savedPins(placements, truncated)
+              // One attempt, once the pin has been placed. If the visitor is in
+              // the middle of something else by then, it stays a marker to click.
+              if (viewing && saved?.get(viewing)) {
+                showSaved(viewing)
+                viewing = null
+                viewShown = true
+              }
+            },
+            viewToken
+              ? {
+                  token: viewToken,
+                  found: (id) => {
+                    if (!viewShown) viewing = id
+                  },
+                }
+              : undefined,
           ),
         null,
       )
@@ -234,18 +288,13 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
             upload: (file) => {
               if (phase === 'compose' && !pending) shots.choose(file)
             },
-            saved: (id) => {
-              const placement = saved?.get(id)
-              if (!placement || phase !== 'idle') return
-              previousFocus = win.document.activeElement instanceof HTMLElement ? win.document.activeElement : null
-              phase = 'detail'
-              view?.show(phase, true)
-              view?.detail(placement)
-            },
+            saved: (id) => void showSaved(id),
           },
           nonce,
         )
         view.show('idle', identified())
+        dropViewToken()
+        safe(takeViewToken, undefined)
         startPins()
         emit('ready')
         break
@@ -263,6 +312,7 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
       }
       case 'logout':
         close(false)
+        dropViewToken()
         saved?.dispose()
         saved = null
         if (config) config.identity = undefined

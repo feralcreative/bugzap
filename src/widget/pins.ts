@@ -8,8 +8,10 @@ export function watchPins(
   win: Window,
   api: string,
   site: string,
-  identity: string,
+  identity: string | undefined,
   render: (pins: PinPlacement[], truncated: boolean) => void,
+  /** An owner's "Open on page" token and what to do once its pin has loaded. */
+  view?: { token: string; found: (id: string) => void },
 ) {
   let active = true
   let controller: AbortController | null = null
@@ -74,18 +76,27 @@ export function watchPins(
     if (typeof win.fetch !== 'function') return
     const pending = controller
     const timer = win.setTimeout(() => pending.abort(), 15000)
-    try {
+    const load = async (path: string, authorization: string): Promise<unknown> => {
       const response = await win.fetch(
-        `${api}/v1/pins?site=${encodeURIComponent(site)}&page=${encodeURIComponent(key)}`,
-        {
-          method: 'GET',
-          credentials: 'omit',
-          headers: { Authorization: `Bearer ${identity}` },
-          signal: pending.signal,
-        },
+        `${api}/v1/pins${path}?site=${encodeURIComponent(site)}&page=${encodeURIComponent(key)}`,
+        { method: 'GET', credentials: 'omit', headers: { Authorization: authorization }, signal: pending.signal },
       )
       if (response.status !== 200) throw new Error('Pins unavailable')
-      const raw: unknown = await response.json()
+      return response.json()
+    }
+    try {
+      // The two reads are independent. An expired or mismatched view token must
+      // not cost a reporter their own pins, and a stale identity must not hide
+      // the one pin an owner came to see.
+      const [raw, viewed] = await Promise.all([
+        identity
+          ? load('', `Bearer ${identity}`).catch((error: unknown) => {
+              if (!view) throw error
+              return { pins: [] }
+            })
+          : { pins: [] },
+        view ? load('/view', `View ${view.token}`).catch(() => null) : null,
+      ])
       if (!active || current !== generation) return
       if (!raw || typeof raw !== 'object' || !('pins' in raw) || !Array.isArray(raw.pins) || raw.pins.length > PINS_MAX)
         throw new Error('Invalid pins')
@@ -93,6 +104,11 @@ export function watchPins(
         const pin = parseSavedPin(value)
         return pin ? [pin] : []
       })
+      const extra = viewed && typeof viewed === 'object' && 'pin' in viewed ? parseSavedPin(viewed.pin) : null
+      if (extra) {
+        if (!pins.some((pin) => pin.id === extra.id)) pins.unshift(extra)
+        view?.found(extra.id)
+      }
       truncated = 'truncated' in raw && raw.truncated === true
       schedule(true)
     } catch {
