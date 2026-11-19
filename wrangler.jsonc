@@ -79,7 +79,11 @@
     "staging": {
       "name": "bugzap-staging",
       "account_id": "30aa05fc7822ef63635046e5c7771a9a",
+      // workers.dev stays on until the custom domain is confirmed working.
       "workers_dev": true,
+      // A custom domain: deploying creates and manages the DNS record for this
+      // hostname in the bugzap.app zone.
+      "routes": [{ "pattern": "stage.bugzap.app", "custom_domain": true }],
       "preview_urls": false,
       "d1_databases": [
         {
@@ -101,7 +105,10 @@
     "production": {
       "name": "bugzap",
       "account_id": "30aa05fc7822ef63635046e5c7771a9a",
-      "workers_dev": true,
+      "workers_dev": false,
+      // A custom domain: deploying creates and manages the DNS record for this
+      // hostname in the bugzap.app zone.
+      "routes": [{ "pattern": "bugzap.app", "custom_domain": true }],
       "preview_urls": false,
       "d1_databases": [
         {

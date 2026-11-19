@@ -54,14 +54,10 @@ done
 
 [ -n "${DEPLOY_ENV:-}" ] || { log_error "DEPLOY_ENV not set — run prod.sh or stage.sh"; exit 1; }
 case "$DEPLOY_ENV" in
-  prod)  WRANGLER_ENV="production"; WORKER="bugzap";         ENV_LABEL="PRODUCTION"; ENV_COLOR="$RED" ;;
-  stage) WRANGLER_ENV="staging";    WORKER="bugzap-staging"; ENV_LABEL="STAGING";    ENV_COLOR="$YELLOW" ;;
+  prod)  WRANGLER_ENV="production"; WORKER="bugzap";         TARGET_URL="https://bugzap.app";       ENV_LABEL="PRODUCTION"; ENV_COLOR="$RED" ;;
+  stage) WRANGLER_ENV="staging";    WORKER="bugzap-staging"; TARGET_URL="https://stage.bugzap.app"; ENV_LABEL="STAGING";    ENV_COLOR="$YELLOW" ;;
   *) log_error "Invalid DEPLOY_ENV: $DEPLOY_ENV"; exit 1 ;;
 esac
-# v1 runs on workers.dev, whose account subdomain is only known once Wrangler
-# reports it. The real URL is read from the deploy output further down.
-TARGET_URL="${WORKER} on workers.dev"
-
 require_cmd git  "Git is required."
 require_cmd node "Install Node.js 22 or later."
 require_cmd npm  "Install Node.js (with npm)."
@@ -150,11 +146,7 @@ if [ -n "${DRY_RUN:-}" ]; then
   npx wrangler deploy --env "$WRANGLER_ENV" --dry-run --outdir .wrangler/dry-run
 else
   log_info "Deploying Worker to ${WRANGLER_ENV}..."
-  DEPLOY_LOG=$(mktemp -t bugzap-deploy.XXXXXX)
-  trap 'rm -f "$DEPLOY_LOG"' EXIT
-  npx wrangler deploy --env "$WRANGLER_ENV" 2>&1 | tee "$DEPLOY_LOG"
-  DEPLOYED_URL=$(grep -Eo 'https://[A-Za-z0-9.-]+\.workers\.dev' "$DEPLOY_LOG" | head -1 || true)
-  [ -n "$DEPLOYED_URL" ] && TARGET_URL="$DEPLOYED_URL"
+  npx wrangler deploy --env "$WRANGLER_ENV"
 fi
 DEPLOY_TIME=$(($(date +%s) - DEPLOY_PHASE_START))
 
