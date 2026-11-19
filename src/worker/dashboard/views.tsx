@@ -74,7 +74,7 @@ export function SitesPage(props: {
   user: SessionUser
   sites: (AccountSite & { origins: number; pending: number })[]
   error?: string
-  draft?: { name: string; origins: string }
+  draft?: { name: string; origins: string; identityMode: 'guest' | 'signed' }
 }) {
   const { user, sites, error, draft } = props
   return (
@@ -118,6 +118,23 @@ export function SitesPage(props: {
             One per line, up to {ORIGINS_MAX}. Reports are accepted only from pages on these origins. Use HTTPS, or HTTP
             for&nbsp;localhost.
           </p>
+          <fieldset>
+            <legend>Who can send reports</legend>
+            <label class="choice">
+              <input type="radio" name="identity" value="guest" checked={draft?.identityMode !== 'signed'} />
+              <span>
+                Anyone on those pages. You paste one snippet and are done; reporters can add a name and email if
+                they&nbsp;like.
+              </span>
+            </label>
+            <label class="choice">
+              <input type="radio" name="identity" value="signed" checked={draft?.identityMode === 'signed'} />
+              <span>
+                Only people signed in to your site. Your server signs a token for each user, so every report carries a
+                verified&nbsp;identity.
+              </span>
+            </label>
+          </fieldset>
           <div class="actions">
             <button type="submit" class="primary">
               Create site
@@ -129,17 +146,21 @@ export function SitesPage(props: {
   )
 }
 
-function snippet(publicKey: string, api: string): string {
+function snippet(publicKey: string, api: string, signed: boolean): string {
+  const options = signed
+    ? `{
+    site: '${publicKey}',
+    // A token your server signs for the signed-in user, or null when nobody is.
+    identity: SERVER_SIGNED_IDENTITY_TOKEN,
+  }`
+    : `{ site: '${publicKey}' }`
   return `<script>
   window.Bugzap =
     window.Bugzap ||
     function () {
       ;(window.Bugzap.q = window.Bugzap.q || []).push(arguments)
     }
-  Bugzap('init', {
-    site: '${publicKey}',
-    identity: 'SERVER_SIGNED_IDENTITY_TOKEN',
-  })
+  Bugzap('init', ${options})
 </script>
 <script async src="${api}/v1/bugzap.js"></script>`
 }
@@ -151,9 +172,12 @@ export function SitePage(props: {
   now: number
   /** Present only on the response to the request that created or rotated it. */
   secret?: { value: string; rotated: boolean }
+  /** True on the response that created the site. */
+  created?: boolean
   error?: string
 }) {
-  const { user, site, api, now, secret, error } = props
+  const { user, site, api, now, secret, created, error } = props
+  const signed = site.identity_mode === 'signed'
   const base = `/sites/${site.public_key}`
   const grace = site.previous_secret_expires_at && site.previous_secret_expires_at > now
   return (
@@ -177,16 +201,25 @@ export function SitePage(props: {
         </div>
       )}
 
-      <h2>Public site key</h2>
-      <p>
-        <code>{site.public_key}</code>
-      </p>
+      {created && !secret && (
+        <div class="card notice">
+          <p>Your site is ready. Paste the snippet below into its pages and reports will start arriving&nbsp;here.</p>
+        </div>
+      )}
 
       <h2>Embed</h2>
-      <p>Add this to each page, with a token your server signs for the signed-in&nbsp;user.</p>
+      <p>
+        {signed
+          ? 'Add this to each page, with a token your server signs for the signed-in user.'
+          : 'Add this to each page, just before the closing body tag. That is the whole setup.'}
+      </p>
       <pre>
-        <code>{snippet(site.public_key, api)}</code>
+        <code>{snippet(site.public_key, api, signed)}</code>
       </pre>
+      <p class="hint">
+        <code>{site.public_key}</code> is this site’s public key. It only says which site a report is for, and is safe
+        to&nbsp;publish.
+      </p>
 
       <h2>Allowed origins</h2>
       {error && (
@@ -223,22 +256,52 @@ export function SitePage(props: {
         )}
       </div>
 
-      <h2>Signing secret</h2>
-      <p>
-        Rotating makes a new secret and shows it once. The current one keeps working for 24 hours, so pages that are
-        already open keep&nbsp;reporting.
-      </p>
-      {grace && (
-        <p class="meta">
-          The previous secret still works until {new Date(site.previous_secret_expires_at! * 1000).toISOString()}.
-          Rotating again ends it&nbsp;immediately.
-        </p>
+      <h2>Who can send reports</h2>
+      {signed ? (
+        <>
+          <p>
+            Only people your server identifies. It signs a short token for each signed-in user with this site’s signing
+            secret, and the widget stays hidden until it has&nbsp;one.
+          </p>
+          <p>
+            Rotating makes a new secret and shows it once. The current one keeps working for 24 hours, so pages that are
+            already open keep&nbsp;reporting.
+          </p>
+          {grace && (
+            <p class="meta">
+              The previous secret still works until {new Date(site.previous_secret_expires_at! * 1000).toISOString()}.
+              Rotating again ends it&nbsp;immediately.
+            </p>
+          )}
+          <div class="inline">
+            <form method="post" action={`${base}/rotate`}>
+              <button type="submit" class="danger">
+                Rotate secret
+              </button>
+            </form>
+            <form method="post" action={`${base}/identity`}>
+              <input type="hidden" name="mode" value="guest" />
+              <button type="submit">Open to guests</button>
+            </form>
+          </div>
+        </>
+      ) : (
+        <>
+          <p>
+            Anyone on the allowed origins. Reporters are guests: a name and email are optional and unverified, and each
+            browser sees only its own&nbsp;pins.
+          </p>
+          <p>
+            If your site has its own sign-in, you can require it. Your server then signs a token for each user, guests
+            are turned away, and every report carries a verified identity. Switching shows you the signing secret your
+            server&nbsp;needs.
+          </p>
+          <form method="post" action={`${base}/identity`}>
+            <input type="hidden" name="mode" value="signed" />
+            <button type="submit">Require signed identity</button>
+          </form>
+        </>
       )}
-      <form method="post" action={`${base}/rotate`}>
-        <button type="submit" class="danger">
-          Rotate secret
-        </button>
-      </form>
     </Page>
   )
 }

@@ -59,7 +59,11 @@ export const keyIn = (html: string) => /bz_pk_[A-Za-z0-9]{22}/.exec(html)?.[0]
 
 /** A site made through the dashboard, as an owner would make it. */
 export async function newSite(cookie: string, form: Record<string, string> = {}) {
-  const res = await call('/sites', { cookie, form: { name: 'Docs', origins: 'https://docs.example', ...form } })
+  // Signed identity unless a test asks for a guest site: most tests file reports with a token.
+  const res = await call('/sites', {
+    cookie,
+    form: { name: 'Docs', origins: 'https://docs.example', identity: 'signed', ...form },
+  })
   const html = await res.text()
   return { res, html, key: keyIn(html)!, secret: secretIn(html)! }
 }

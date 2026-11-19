@@ -46,6 +46,14 @@ createServer(async (req, res) => {
         const config = JSON.stringify({ site: seed.site, identity }).replaceAll('<', '\\u003c')
         html = html.replaceAll('{{BUGZAP_CONFIG}}', config)
       }
+      // The guest page gets the public key and nothing else: no token, no secret.
+      if (html.includes('{{BUGZAP_GUEST_CONFIG}}')) {
+        const seed = await readSeed()
+        html = html.replaceAll(
+          '{{BUGZAP_GUEST_CONFIG}}',
+          JSON.stringify({ site: seed.site }).replaceAll('<', '\\u003c'),
+        )
+      }
       body = Buffer.from(html)
     }
     res

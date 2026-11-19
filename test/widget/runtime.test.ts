@@ -105,7 +105,7 @@ describe('widget lifecycle', () => {
   })
 
   it('requires identification and clears drafts, context and recorder state on logout', () => {
-    api('init', { site: SITE })
+    api('init', { site: SITE, identity: null })
     expect(shadow().querySelector<HTMLButtonElement>('.launcher')?.hidden).toBe(true)
     api('identify', TOKEN)
     button('Feedback').click()
@@ -455,7 +455,7 @@ describe('an owner’s view link', () => {
     target()
     const calls = stubView()
     location.hash = `#section=2&bugzap-view=${VIEW}`
-    api('init', { site: SITE })
+    api('init', { site: SITE, identity: null })
     expect(location.hash).toBe('#section=2')
     await vi.waitFor(() => expect(shadow().querySelector('.report-body')?.textContent).toBe(pin.body))
     expect(calls).toHaveLength(1)
@@ -501,7 +501,7 @@ describe('an owner’s view link', () => {
     target()
     const calls = stubView()
     location.hash = `#bugzap-view=${VIEW}`
-    api('init', { site: SITE })
+    api('init', { site: SITE, identity: null })
     await vi.waitFor(() => expect(shadow().querySelectorAll('.saved-pin')).toHaveLength(1))
     api('logout')
     api('identify', 'a-different-reporter-token')
@@ -539,8 +539,130 @@ describe('an owner’s view link', () => {
   it('ignores a fragment that is not a view token', () => {
     const calls = stubView()
     location.hash = '#notbugzap-view=abc'
-    api('init', { site: SITE })
+    api('init', { site: SITE, identity: null })
     expect(location.hash).toBe('#notbugzap-view=abc')
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe('guest reporters', () => {
+  const guestInit = () => api('init', { site: SITE })
+  const stored = () =>
+    JSON.parse(localStorage.getItem(`bugzap:${SITE}`) ?? 'null') as { t: string; n?: string; e?: string }
+  function capture() {
+    const posts: { url: string; payload: Record<string, unknown> }[] = []
+    const gets: { url: string; authorization: string | null }[] = []
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'GET') {
+        gets.push({ url: String(input), authorization: new Headers(init.headers).get('Authorization') })
+        return new Response(JSON.stringify({ ok: true, pins: [], truncated: false }))
+      }
+      const payload = JSON.parse(String((init?.body as FormData).get('payload'))) as Record<string, unknown>
+      posts.push({ url: String(input), payload })
+      return new Response(JSON.stringify({ ok: true, id: 'ABCDEFGHIJKLMNOPQRSTUV' }), { status: 201 })
+    })
+    return { posts, gets }
+  }
+  const input = (id: string) => shadow().querySelector<HTMLInputElement>(`#${id}`)!
+  beforeEach(() => localStorage.clear())
+
+  it('shows the launcher with no identity, and reads pins with a stored random id', async () => {
+    const { gets } = capture()
+    guestInit()
+    expect(button('Feedback')).toBeTruthy()
+    const id = stored().t
+    expect(id).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    await vi.waitFor(() => expect(gets).toHaveLength(1))
+    expect(gets[0]!.authorization).toBe(`Guest ${id}`)
+    expect(gets[0]!.url).not.toContain(id)
+
+    // The same browser keeps the same id; a second site gets its own.
+    guestInit()
+    expect(stored().t).toBe(id)
+    api('init', { site: 'bz_pk_ZYXWVUTSRQPONMLKJIHGFE' })
+    expect(JSON.parse(localStorage.getItem('bugzap:bz_pk_ZYXWVUTSRQPONMLKJIHGFE')!).t).not.toBe(id)
+  })
+
+  it('sends the guest id with an optional name and email, and remembers them', async () => {
+    const { posts } = capture()
+    guestInit()
+    button('Feedback').click()
+    button('Report this page').click()
+    expect(input('bugzap-name').closest('[hidden]')).toBeNull()
+    textArea().value = 'The total is wrong.'
+    input('bugzap-email').value = 'not an address'
+    button('Send report').click()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(posts).toHaveLength(0)
+    expect(shadow().querySelector('.error')?.textContent).toContain('email')
+
+    input('bugzap-name').value = '  Dana Reyes '
+    input('bugzap-email').value = 'dana@example.com'
+    button('Send report').click()
+    await vi.waitFor(() => expect(posts).toHaveLength(1))
+    expect(posts[0]!.payload).toMatchObject({
+      site: SITE,
+      guest: stored().t,
+      reporter: { name: 'Dana Reyes', email: 'dana@example.com' },
+    })
+    expect(posts[0]!.payload).not.toHaveProperty('identity')
+    expect(stored()).toMatchObject({ n: 'Dana Reyes', e: 'dana@example.com' })
+
+    // Next time the fields come back filled in; clearing them sends neither.
+    button('Done').click()
+    button('Feedback').click()
+    button('Report this page').click()
+    expect(input('bugzap-name').value).toBe('Dana Reyes')
+    input('bugzap-name').value = ''
+    input('bugzap-email').value = ''
+    textArea().value = 'Another thing.'
+    button('Send report').click()
+    await vi.waitFor(() => expect(posts).toHaveLength(2))
+    expect(posts[1]!.payload.reporter).toEqual({})
+  })
+
+  it('reports as the signed-in user once identified, with no guest fields, and as a guest again after logout', async () => {
+    const { posts, gets } = capture()
+    guestInit()
+    api('identify', TOKEN)
+    await vi.waitFor(() => expect(gets.at(-1)?.authorization).toBe(`Bearer ${TOKEN}`))
+    button('Feedback').click()
+    button('Report this page').click()
+    expect(input('bugzap-name').closest('[hidden]')).not.toBeNull()
+    textArea().value = 'Signed in now.'
+    button('Send report').click()
+    await vi.waitFor(() => expect(posts).toHaveLength(1))
+    expect(posts[0]!.payload).toMatchObject({ identity: TOKEN })
+    expect(posts[0]!.payload).not.toHaveProperty('guest')
+    expect(posts[0]!.payload).not.toHaveProperty('reporter')
+
+    api('logout')
+    expect(button('Feedback')).toBeTruthy()
+    await vi.waitFor(() => expect(gets.at(-1)?.authorization).toBe(`Guest ${stored().t}`))
+  })
+
+  it('still works, for the length of the page, when storage is unavailable', async () => {
+    const { posts } = capture()
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked')
+    })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('blocked')
+    })
+    guestInit()
+    button('Feedback').click()
+    button('Report this page').click()
+    textArea().value = 'No storage here.'
+    button('Send report').click()
+    await vi.waitFor(() => expect(posts).toHaveLength(1))
+    expect(posts[0]!.payload.guest).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    // Starting the widget again on the same site keeps the same guest.
+    guestInit()
+    button('Feedback').click()
+    button('Report this page').click()
+    textArea().value = 'Still me.'
+    button('Send report').click()
+    await vi.waitFor(() => expect(posts).toHaveLength(2))
+    expect(posts[1]!.payload.guest).toBe(posts[0]!.payload.guest)
   })
 })

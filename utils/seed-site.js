@@ -56,6 +56,7 @@ INSERT OR IGNORE INTO memberships (account_id, user_id)
 INSERT INTO sites (account_id, public_key, name, secret_cipher)
   SELECT id, ${quote(seed.site)}, ${quote(seed.name)}, ${quote(cipher)} FROM accounts WHERE public_id = ${quote(seed.accountId)}
   ON CONFLICT (public_key) DO NOTHING;
+UPDATE sites SET identity_mode = 'guest' WHERE public_key = ${quote(seed.site)};
 INSERT OR IGNORE INTO site_origins (account_id, site_id, origin)
   SELECT account_id, id, ${quote(values.origin ? origin : seed.origin)} FROM sites WHERE public_key = ${quote(seed.site)};
 `

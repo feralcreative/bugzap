@@ -1,5 +1,4 @@
 import type { Diagnostics } from '../../core/diagnostics'
-import type { IdentityClaims } from '../../core/identity'
 import type { ReportPayload } from '../../core/payload'
 import {
   ORIGINS_MAX,
@@ -19,6 +18,7 @@ export type IngestSite = {
   previous_secret_cipher: string | null
   previous_secret_expires_at: number | null
   enabled: number
+  identity_mode: 'guest' | 'signed'
 }
 
 // The public key selects a site, never an account supplied by the reporter. After
@@ -27,7 +27,7 @@ export function findIngestSite(db: D1Database, publicKey: string): Promise<Inges
   return db
     .prepare(
       `SELECT id, account_id, public_key, secret_cipher,
-    previous_secret_cipher, previous_secret_expires_at, enabled FROM sites WHERE public_key = ?`,
+    previous_secret_cipher, previous_secret_expires_at, enabled, identity_mode FROM sites WHERE public_key = ?`,
     )
     .bind(publicKey)
     .first<IngestSite>()
@@ -48,6 +48,19 @@ export async function hourlyCount(db: D1Database, site: IngestSite, subject: str
     WHERE r.account_id = ? AND r.site_id = ? AND p.subject = ? AND r.created_at > ?`,
     )
     .bind(site.account_id, site.id, subject, now - 3600)
+    .first<{ n: number }>()
+  return row?.n ?? 0
+}
+
+/** Reports guests filed on this site in the last hour, all guests together. */
+export async function guestHourlyCount(db: D1Database, site: IngestSite, now: number): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT count(*) AS n FROM reports r JOIN reporters p ON p.id = r.reporter_id
+    AND p.site_id = r.site_id AND p.account_id = r.account_id
+    WHERE r.account_id = ? AND r.site_id = ? AND r.created_at > ? AND p.subject LIKE 'guest:%'`,
+    )
+    .bind(site.account_id, site.id, now - 3600)
     .first<{ n: number }>()
   return row?.n ?? 0
 }
@@ -74,7 +87,8 @@ export async function saveReport(
   site: IngestSite,
   input: {
     publicId: string
-    claims: IdentityClaims
+    /** The reporter, signed or guest. */
+    claims: { sub: string; email?: string; name?: string }
     payload: ReportPayload
     pageKey: string
     diagnostics: Diagnostics
@@ -204,6 +218,7 @@ export type AccountSite = {
   enabled: number
   created_at: number
   previous_secret_expires_at: number | null
+  identity_mode: 'guest' | 'signed'
 }
 
 export function accountSites(
@@ -212,7 +227,7 @@ export function accountSites(
 ): Promise<(AccountSite & { origins: number; pending: number })[]> {
   return db
     .prepare(
-      `SELECT s.id, s.public_key, s.name, s.enabled, s.created_at, s.previous_secret_expires_at,
+      `SELECT s.id, s.public_key, s.name, s.enabled, s.created_at, s.previous_secret_expires_at, s.identity_mode,
       (SELECT count(*) FROM site_origins o WHERE o.account_id = s.account_id AND o.site_id = s.id) AS origins,
       (SELECT count(*) FROM reports r WHERE r.account_id = s.account_id AND r.site_id = s.id AND r.state = 'pending') AS pending
     FROM sites s WHERE s.account_id = ? ORDER BY s.id`,
@@ -229,7 +244,7 @@ export async function accountSite(
 ): Promise<(AccountSite & { origins: string[] }) | null> {
   const site = await db
     .prepare(
-      `SELECT id, public_key, name, enabled, created_at, previous_secret_expires_at
+      `SELECT id, public_key, name, enabled, created_at, previous_secret_expires_at, identity_mode
     FROM sites WHERE account_id = ? AND public_key = ?`,
     )
     .bind(accountId, publicKey)
@@ -246,16 +261,23 @@ export async function accountSite(
 export async function createSite(
   db: D1Database,
   accountId: number,
-  input: { publicKey: string; name: string; secretCipher: string; origins: string[]; now: number },
+  input: {
+    publicKey: string
+    name: string
+    secretCipher: string
+    origins: string[]
+    identityMode: 'guest' | 'signed'
+    now: number
+  },
 ): Promise<boolean> {
-  const { publicKey, name, secretCipher, origins, now } = input
+  const { publicKey, name, secretCipher, origins, identityMode, now } = input
   const results = await db.batch([
     db
       .prepare(
-        `INSERT INTO sites (account_id, public_key, name, secret_cipher, created_at)
-      SELECT ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM sites WHERE account_id = ?) < ?`,
+        `INSERT INTO sites (account_id, public_key, name, secret_cipher, identity_mode, created_at)
+      SELECT ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM sites WHERE account_id = ?) < ?`,
       )
-      .bind(accountId, publicKey, name, secretCipher, now, accountId, SITES_MAX),
+      .bind(accountId, publicKey, name, secretCipher, identityMode, now, accountId, SITES_MAX),
     // Resolved through the row above: when the limit refused it, these insert nothing.
     ...origins.slice(0, ORIGINS_MAX).map((origin) =>
       db
@@ -274,6 +296,10 @@ export async function createSite(
  * `graceUntil`, so pages already open keep reporting. Rotating again inside the
  * grace period ends the older secret at once: only one previous secret is kept.
  *
+ * Only a site that requires signed identity has a secret worth rotating, and the
+ * mode is part of the swap: a rotation can never land on top of a switch to
+ * signed identity, which installs its own fresh secret.
+ *
  * Compare-and-swap on the secret that was current when this request read it. Of
  * two rotations sent at once (a double-click), one wins and the other returns
  * false, so no response ever shows as "new" a secret that is already the old one.
@@ -285,17 +311,44 @@ export async function rotateSiteSecret(
   input: { secretCipher: string; graceUntil: number },
 ): Promise<boolean> {
   const current = await db
-    .prepare('SELECT secret_cipher FROM sites WHERE account_id = ? AND public_key = ?')
+    .prepare("SELECT secret_cipher FROM sites WHERE account_id = ? AND public_key = ? AND identity_mode = 'signed'")
     .bind(accountId, publicKey)
     .first<{ secret_cipher: string }>()
   if (!current) return false
   const result = await db
     .prepare(
       `UPDATE sites SET previous_secret_cipher = secret_cipher, previous_secret_expires_at = ?, secret_cipher = ?
-    WHERE account_id = ? AND public_key = ? AND secret_cipher = ?`,
+    WHERE account_id = ? AND public_key = ? AND secret_cipher = ? AND identity_mode = 'signed'`,
     )
     .bind(input.graceUntil, input.secretCipher, accountId, publicKey, current.secret_cipher)
     .run()
+  return result.meta.changes === 1
+}
+
+/**
+ * Changes who may report. Moving to 'signed' also installs a fresh signing secret
+ * and drops any previous one: a site that was open to guests may never have had
+ * its first secret copied down, so the owner is shown this one and starts clean.
+ */
+export async function setSiteIdentityMode(
+  db: D1Database,
+  accountId: number,
+  publicKey: string,
+  input: { mode: 'guest' } | { mode: 'signed'; secretCipher: string },
+): Promise<boolean> {
+  const result =
+    input.mode === 'guest'
+      ? await db
+          .prepare("UPDATE sites SET identity_mode = 'guest' WHERE account_id = ? AND public_key = ?")
+          .bind(accountId, publicKey)
+          .run()
+      : await db
+          .prepare(
+            `UPDATE sites SET identity_mode = 'signed', secret_cipher = ?, previous_secret_cipher = NULL,
+          previous_secret_expires_at = NULL WHERE account_id = ? AND public_key = ? AND identity_mode = 'guest'`,
+          )
+          .bind(input.secretCipher, accountId, publicKey)
+          .run()
   return result.meta.changes === 1
 }
 
@@ -340,6 +393,7 @@ export type InboxReport = {
   created_at: number
   reporter_name: string | null
   reporter_email: string | null
+  reporter_subject: string
   pinned: number
   shots: number
 }
@@ -370,7 +424,7 @@ export async function siteReports(
   const { results } = await db
     .prepare(
       `SELECT r.public_id, r.kind, r.state, r.status, r.title, r.priority, r.page_url, r.created_at,
-      p.name AS reporter_name, p.email AS reporter_email,
+      p.name AS reporter_name, p.email AS reporter_email, p.subject AS reporter_subject,
       EXISTS (SELECT 1 FROM pins x WHERE x.account_id = r.account_id AND x.report_id = r.id) AS pinned,
       (SELECT count(*) FROM attachments a WHERE a.account_id = r.account_id AND a.report_id = r.id) AS shots
     FROM reports r JOIN reporters p ON p.account_id = r.account_id AND p.site_id = r.site_id AND p.id = r.reporter_id
@@ -404,7 +458,6 @@ export type ReportDetail = InboxReport & {
   screenshot_mode: string
   screenshot_failed: string | null
   updated_at: number
-  reporter_subject: string
   anchor_json: string | null
   diagnostics_json: string | null
   attachments: ReportAttachment[]

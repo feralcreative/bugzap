@@ -106,6 +106,20 @@ export function createView(doc: Document, actions: ViewActions, nonce?: string) 
   body.maxLength = BODY_MAX
   body.placeholder = 'Describe the problem, idea, or question.'
   body.setAttribute('aria-describedby', 'bugzap-error')
+  // Shown to guests only. Both are optional and nothing checks them.
+  const who = element('div', undefined, 'who')
+  const whoField = (label: string, type: string, id: string, max: number) => {
+    const text = element('label', label)
+    text.htmlFor = id
+    const input = element('input')
+    input.id = id
+    input.type = type
+    input.maxLength = max
+    who.append(text, input)
+    return input
+  }
+  const nameInput = whoField('Your name (optional)', 'text', 'bugzap-name', 100)
+  const emailInput = whoField('Email, for a reply (optional)', 'email', 'bugzap-email', 254)
   const error = element('p', '', 'error')
   error.id = 'bugzap-error'
   error.setAttribute('role', 'status')
@@ -169,7 +183,7 @@ export function createView(doc: Document, actions: ViewActions, nonce?: string) 
   const cancel = button('Cancel', actions.close)
   const send = button('Send report', () => actions.submit(), 'primary')
   actionsRow.append(cancel, send)
-  form.append(target, kindLabel, kind, bodyLabel, body, shot, error, actionsRow)
+  form.append(target, kindLabel, kind, bodyLabel, body, who, shot, error, actionsRow)
   const success = element('div')
   success.setAttribute('role', 'status')
   const done = button('Done', actions.close, 'primary')
@@ -199,6 +213,7 @@ export function createView(doc: Document, actions: ViewActions, nonce?: string) 
     shot.hidden =
     toggle.hidden =
     savedLayer.hidden =
+    who.hidden =
       true
   doc.documentElement.append(host)
   if (typeof surface.showPopover === 'function') {
@@ -268,7 +283,18 @@ export function createView(doc: Document, actions: ViewActions, nonce?: string) 
       detailApproximate.hidden = !resolution.approximate
       detailClose.focus()
     },
-    draft: () => ({ kind: kind.value as ReportKind, body: body.value, includeShot: include.checked }),
+    draft: () => ({
+      kind: kind.value as ReportKind,
+      body: body.value,
+      includeShot: include.checked,
+      name: nameInput.value,
+      email: emailInput.value,
+    }),
+    guest(on: boolean, name = '', email = '') {
+      who.hidden = !on
+      nameInput.value = name
+      emailInput.value = email
+    },
     shot: showShot,
     clear() {
       showShot({ kind: 'off' })
@@ -276,10 +302,25 @@ export function createView(doc: Document, actions: ViewActions, nonce?: string) 
       kind.value = 'bug'
       error.textContent = ''
       send.disabled = false
-      body.disabled = kind.disabled = repin.disabled = include.disabled = upload.disabled = false
+      body.disabled =
+        kind.disabled =
+        repin.disabled =
+        include.disabled =
+        upload.disabled =
+        nameInput.disabled =
+        emailInput.disabled =
+          false
     },
     sending(value: boolean) {
-      send.disabled = body.disabled = kind.disabled = repin.disabled = include.disabled = upload.disabled = value
+      send.disabled =
+        body.disabled =
+        kind.disabled =
+        repin.disabled =
+        include.disabled =
+        upload.disabled =
+        nameInput.disabled =
+        emailInput.disabled =
+          value
       send.textContent = value ? 'Sending…' : 'Send report'
       form.setAttribute('aria-busy', String(value))
       error.textContent = value ? 'Sending report…' : ''

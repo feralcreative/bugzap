@@ -5,9 +5,12 @@
 // diagnostics are garbage is still worth keeping, so `diagnostics` is passed through
 // as `unknown` for redactDiagnostics to deal with.
 //
-// The identity token is checked for shape only here. Whether it is genuine is
-// ./identity.ts, which needs the site's secret.
+// A report says who sent it in one of two ways: a host-signed `identity` token, or
+// a `guest` id with whatever name and email the guest chose to give. Both are
+// checked for shape only here. Whether a token is genuine is ./identity.ts, which
+// needs the site's secret; whether a site takes guests at all is the Worker's call.
 import { type Anchor, parseAnchor } from './anchor'
+import { isGuestId, isPlainEmail, REPORTER_NAME_MAX } from './guest'
 import { isPublicKey } from './ids'
 import { IDENTITY_TOKEN_MAX } from './identity'
 import { BODY_MAX, BODY_MIN, isKind, type ReportKind } from './policy'
@@ -22,7 +25,10 @@ export type ScreenshotMode = (typeof SCREENSHOT_MODES)[number]
 export type ReportPayload = {
   v: 1
   site: string
-  identity: string
+  identity?: string
+  guest?: string
+  /** What a guest typed about themselves. Unverified, and ignored beside a token. */
+  reporter?: { name?: string; email?: string }
   kind: ReportKind
   body: string
   page: { url: string; title?: string }
@@ -48,8 +54,14 @@ export function parseReportPayload(raw: unknown): PayloadResult {
   if (!p) return fail('payload must be an object')
   if (p.v !== PAYLOAD_VERSION) return fail('unsupported payload version')
   if (!isPublicKey(p.site)) return fail('site must be a public key')
-  if (typeof p.identity !== 'string' || !p.identity || p.identity.length > IDENTITY_TOKEN_MAX)
-    return fail('identity token missing')
+  const identity = typeof p.identity === 'string' && p.identity ? p.identity : undefined
+  if (identity && identity.length > IDENTITY_TOKEN_MAX) return fail('identity token too long')
+  const guest = identity ? undefined : p.guest
+  if (!identity && !isGuestId(guest)) return fail('identity token or guest id missing')
+  const who = identity ? null : obj(p.reporter)
+  const name = typeof who?.name === 'string' ? who.name.replace(/\s+/g, ' ').trim().slice(0, REPORTER_NAME_MAX) : ''
+  const email = typeof who?.email === 'string' ? who.email.trim() : ''
+  if (email && !isPlainEmail(email)) return fail('reporter email is not an address')
   if (!isKind(p.kind)) return fail('unknown kind')
 
   // Measured after trimming, so a body of spaces does not count as one.
@@ -78,7 +90,8 @@ export function parseReportPayload(raw: unknown): PayloadResult {
     value: {
       v: 1,
       site: p.site,
-      identity: p.identity,
+      ...(identity ? { identity } : { guest: guest as string }),
+      ...((name || email) && { reporter: { ...(name && { name }), ...(email && { email }) } }),
       kind: p.kind,
       body,
       page: { url: page.url, ...(title && { title }) },

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bugzap guest demo</title>
+    <style>
+      body {
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        max-width: 48rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        color: #222;
+        background: #fafafa;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      p {
+        text-wrap: pretty;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Bugzap guest demo</h1>
+    <p>
+      This page has only the embed: a public site key and nothing signed by a server. Anyone who opens it can send a
+      report as a guest, with a name and email if they choose, and sees their own pins when they come&nbsp;back.
+    </p>
+    <div class="card" data-bugzap-id="pricing">
+      <h2>Pricing</h2>
+      <p>The total below is deliberately wrong. Pin it and say&nbsp;so.</p>
+      <p data-bugzap-id="total"><strong>Total: $41.99</strong> (3 × $14.00)</p>
+      <button type="button" data-bugzap-id="checkout">Check out</button>
+    </div>
+
+    <script>
+      window.Bugzap = window.Bugzap || function () { (Bugzap.q = Bugzap.q || []).push(arguments); };
+      Bugzap("init", {{BUGZAP_GUEST_CONFIG}});
+    </script>
+    <script async src="{{BUGZAP_ORIGIN}}/v1/bugzap.js"></script>
+    <p><a href="/">Signed-identity demo</a></p>
+  </body>
+</html>

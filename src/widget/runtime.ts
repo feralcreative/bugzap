@@ -1,7 +1,8 @@
 import type { Anchor } from '../core/anchor'
 import { redactDiagnostics, stripUrl } from '../core/diagnostics'
 import { isPublicKey } from '../core/ids'
-import { IDENTITY_TOKEN_MAX } from '../core/identity'
+import { isGuestId, isPlainEmail } from '../core/guest'
+import { base64UrlEncode, IDENTITY_TOKEN_MAX } from '../core/identity'
 import type { ReportPayload } from '../core/payload'
 import { BODY_MAX, BODY_MIN } from '../core/policy'
 import { normalizeOrigin } from '../core/url'
@@ -19,7 +20,7 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
   if (win.Bugzap?.installed) return win.Bugzap
   const queued = safe(() => (win.Bugzap?.q ?? []).slice(0, 100).map((args) => Array.from(args)), [])
   const listeners = new Map<string, Set<WidgetListener>>()
-  let config: WidgetOptions | null = null
+  let config: { site: string; api: string; identity?: string; signed: boolean } | null = null
   let view: WidgetView | null = null
   let recorder: Recorder | null = null
   let saved: PinWatcher | null = null
@@ -37,7 +38,28 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
   const emit = (event: WidgetEvent, detail: Readonly<Record<string, unknown>> = {}) => {
     for (const listener of listeners.get(event) ?? []) guard(listener)(Object.freeze({ ...detail }))
   }
-  const identified = () => !!config?.identity
+  // A reporter is known either by a host-signed token or, on a site whose embed
+  // asks for none, as a guest.
+  const identified = () => !!config && (!!config.identity || !config.signed)
+  // A guest is one random id per browser per site, kept with the name and email
+  // they last gave. It lives only in this browser; without storage it lasts the page.
+  let guest: { t: string; n?: string; e?: string } | null = null
+  const guestKey = () => `bugzap:${config?.site}`
+  const loadGuest = () => {
+    const kept = safe(() => JSON.parse(win.localStorage.getItem(guestKey()) ?? 'null') as typeof guest, null)
+    guest = kept && isGuestId(kept.t) ? kept : { t: base64UrlEncode(win.crypto.getRandomValues(new Uint8Array(32))) }
+    keepGuest()
+  }
+  const keepGuest = () => safe(() => win.localStorage.setItem(guestKey(), JSON.stringify(guest)), undefined)
+  const asGuest = () => !!config && !config.identity && !config.signed
+  const credential = () =>
+    config?.identity ? `Bearer ${config.identity}` : asGuest() && guest ? `Guest ${guest.t}` : undefined
+  // Run whenever who the reporter is may have changed.
+  const settle = () => {
+    if (asGuest() && !guest) loadGuest()
+    view?.guest(asGuest(), guest?.n, guest?.e)
+    view?.show('idle', identified())
+  }
   const stopSelection = () => {
     win.document.removeEventListener('click', onClick, true)
     win.document.removeEventListener('pointermove', onMove, true)
@@ -155,14 +177,14 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
   const startPins = () => {
     saved?.dispose()
     saved = null
-    if (config?.identity || viewToken)
+    if (identified() || viewToken)
       saved = safe(
         () =>
           watchPins(
             win,
-            config!.api!,
+            config!.api,
             config!.site,
-            config!.identity,
+            credential(),
             (placements, truncated) => {
               view?.savedPins(placements, truncated)
               // One attempt, once the pin has been placed. If the visitor is in
@@ -186,17 +208,30 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
       )
   }
   const submit = async () => {
-    if (!config?.identity || !view || phase !== 'compose' || pending) return
+    if (!config || !identified() || !view || phase !== 'compose' || pending) return
     const draft = view.draft()
     const body = draft.body.trim()
     if (body.length < BODY_MIN || body.length > BODY_MAX) {
       view.error(`Write between ${BODY_MIN} and ${BODY_MAX} characters.`)
       return
     }
+    const name = draft.name.trim()
+    const email = draft.email.trim()
+    if (asGuest() && email && !isPlainEmail(email)) {
+      view.error('Check the email address, or leave it empty.')
+      return
+    }
+    if (asGuest() && guest) {
+      guest = { t: guest.t, ...(name && { n: name }), ...(email && { e: email }) }
+      keepGuest()
+      view.guest(true, name, email)
+    }
     const payload: ReportPayload = {
       v: 1,
       site: config.site,
-      identity: config.identity,
+      ...(config.identity
+        ? { identity: config.identity }
+        : { guest: guest?.t, reporter: { ...(name && { name }), ...(email && { email }) } }),
       kind: draft.kind,
       body,
       page: { url: stripUrl(win.location.href).slice(0, 2048), title: win.document.title.slice(0, 300) },
@@ -204,7 +239,7 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
       screenshot: { mode: 'none' },
       diagnostics: collectDiagnostics(win, recorder, context),
     }
-    const api = config.api!
+    const api = config.api
     const controller = new AbortController()
     pending = controller
     const current = epoch
@@ -260,7 +295,7 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
           emit('error', { code: 'invalid_config' })
           return
         }
-        const identity = value.identity
+        const identity = value.identity ?? undefined
         if (identity !== undefined && (typeof identity !== 'string' || identity.length > IDENTITY_TOKEN_MAX)) {
           emit('error', { code: 'invalid_identity' })
           return
@@ -270,9 +305,11 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
         saved = null
         recorder?.dispose()
         view?.dispose()
-        config = { site: value.site, api, identity }
+        // The same site keeps its guest: with storage blocked, the id exists only here.
+        if (config?.site !== value.site) guest = null
+        config = { site: value.site, api, identity, signed: 'identity' in value }
         context = {}
-        recorder = identity ? createRecorder(win) : null
+        recorder = identified() ? createRecorder(win) : null
         view = createView(
           win.document,
           {
@@ -292,7 +329,7 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
           },
           nonce,
         )
-        view.show('idle', identified())
+        settle()
         dropViewToken()
         safe(takeViewToken, undefined)
         startPins()
@@ -306,7 +343,7 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
         config.identity = args[0]
         context = {}
         recorder = createRecorder(win)
-        view?.show('idle', true)
+        settle()
         startPins()
         break
       }
@@ -317,9 +354,11 @@ export function installWidget(win: Window, defaultApi: string, nonce?: string): 
         saved = null
         if (config) config.identity = undefined
         recorder?.dispose()
-        recorder = null
+        // On a site open to guests, signing out leaves the visitor a guest.
+        recorder = identified() ? createRecorder(win) : null
         context = {}
-        view?.show('idle', false)
+        settle()
+        startPins()
         break
       case 'open':
         open(!!(args[0] && typeof args[0] === 'object' && 'page' in args[0] && args[0].page === true))

@@ -14,6 +14,10 @@
  *  blocking a real bug report is far higher than the cost of storing a few junk rows. */
 export const SUBMIT_LIMIT = 10
 
+/** Reports all guests together may file on one site per hour. A guest can discard
+ *  their id and get a new one, so the per-reporter limit alone does not bound them. */
+export const GUEST_SITE_LIMIT = 100
+
 /** The one required field. */
 export const BODY_MIN = 3
 export const BODY_MAX = 4000

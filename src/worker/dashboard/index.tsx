@@ -17,7 +17,15 @@ import {
   SESSION_TTL_S,
   type SessionUser,
 } from '../db/auth'
-import { accountSite, accountSites, addSiteOrigin, createSite, removeSiteOrigin, rotateSiteSecret } from '../db/scoped'
+import {
+  accountSite,
+  accountSites,
+  addSiteOrigin,
+  createSite,
+  removeSiteOrigin,
+  rotateSiteSecret,
+  setSiteIdentityMode,
+} from '../db/scoped'
 import { type App, type Ctx, now } from './context'
 import { addReportRoutes } from './reports'
 import { dashboardCss } from './style'
@@ -210,7 +218,13 @@ dashboard.post('/sites', async (c) => {
   const user = c.get('user')
   const body = await c.req.parseBody()
   const name = (typeof body.name === 'string' ? body.name : '').trim()
-  const draft = { name: name.slice(0, SITE_NAME_MAX), origins: typeof body.origins === 'string' ? body.origins : '' }
+  // A new site is open to guests unless its owner asks for signed identity.
+  const identityMode = body.identity === 'signed' ? 'signed' : 'guest'
+  const draft = {
+    name: name.slice(0, SITE_NAME_MAX),
+    origins: typeof body.origins === 'string' ? body.origins : '',
+    identityMode,
+  } as const
   const refuse = async (error: string, status: 400 | 409 = 400) =>
     c.html(
       <SitesPage user={user} sites={await accountSites(c.env.DB, user.accountId)} error={error} draft={draft} />,
@@ -229,20 +243,24 @@ dashboard.post('/sites', async (c) => {
     name,
     secretCipher: await encryptSiteSecret(secret, c.env.SITE_KEK, publicKey),
     origins: parsed.origins,
+    identityMode,
     now: now(),
   })
   if (!created) return refuse(`This account has reached its limit of ${SITES_MAX} sites.`, 409)
   const site = await accountSite(c.env.DB, user.accountId, publicKey)
   if (!site) return c.redirect('/sites', 303)
-  // Rendered straight from the POST, never after a redirect: the secret exists in
-  // plain text only in this one response and is not kept anywhere to show again.
+  // A site open to guests needs no secret, so none is shown: the owner pastes the
+  // embed and is done. (One is stored regardless; moving to signed identity later
+  // replaces it.) For a signed site it is rendered straight from the POST, never
+  // after a redirect: it exists in plain text only in this one response.
   return c.html(
     <SitePage
       user={user}
       site={site}
       api={new URL(c.req.url).origin}
       now={now()}
-      secret={{ value: secret, rotated: false }}
+      created
+      secret={identityMode === 'signed' ? { value: secret, rotated: false } : undefined}
     />,
     201,
   )
@@ -280,7 +298,11 @@ dashboard.post('/sites/:key/rotate', async (c) => {
         site={site}
         api={new URL(c.req.url).origin}
         now={now()}
-        error="The secret was rotated by another request at the same moment. Reload before rotating again."
+        error={
+          site.identity_mode === 'signed'
+            ? 'The secret was rotated by another request at the same moment. Reload before rotating again.'
+            : 'This site is open to guests and has no secret in use. Require signed identity to get one.'
+        }
       />,
       409,
     )
@@ -293,6 +315,49 @@ dashboard.post('/sites/:key/rotate', async (c) => {
       api={new URL(c.req.url).origin}
       now={now()}
       secret={{ value: secret, rotated: true }}
+    />,
+  )
+})
+
+dashboard.post('/sites/:key/identity', async (c) => {
+  const user = c.get('user')
+  const site = await ownSite(c)
+  if (!site) return missing(c)
+  // Exactly one of two words. Anything else is refused, never read as "guest":
+  // a mangled request must not open a site its owner closed.
+  const mode = await field(c, 'mode')
+  if (mode !== 'signed' && mode !== 'guest')
+    return c.html(
+      <SitePage
+        user={user}
+        site={site}
+        api={new URL(c.req.url).origin}
+        now={now()}
+        error="Choose who can send reports."
+      />,
+      400,
+    )
+  if (mode === site.identity_mode) return c.redirect(`/sites/${site.public_key}`, 303)
+  if (mode === 'guest') {
+    await setSiteIdentityMode(c.env.DB, user.accountId, site.public_key, { mode })
+    return c.redirect(`/sites/${site.public_key}`, 303)
+  }
+  const secret = generateSecretKey()
+  const changed = await setSiteIdentityMode(c.env.DB, user.accountId, site.public_key, {
+    mode,
+    secretCipher: await encryptSiteSecret(secret, c.env.SITE_KEK, site.public_key),
+  })
+  const fresh = await accountSite(c.env.DB, user.accountId, site.public_key)
+  if (!fresh) return missing(c)
+  // Lost a race with the same change in another tab: that tab was shown the secret.
+  if (!changed) return c.redirect(`/sites/${site.public_key}`, 303)
+  return c.html(
+    <SitePage
+      user={user}
+      site={fresh}
+      api={new URL(c.req.url).origin}
+      now={now()}
+      secret={{ value: secret, rotated: false }}
     />,
   )
 })

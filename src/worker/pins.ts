@@ -4,7 +4,7 @@ import { IDENTITY_TOKEN_MAX } from '../core/identity'
 import { normalizeOrigin, urlKey } from '../core/url'
 import { verifyViewToken } from './auth/view-token'
 import { allowsOrigin, findIngestSite, type IngestSite, reporterPins, viewedPin } from './db/scoped'
-import { siteIdentity } from './identity'
+import { reporterFor } from './identity'
 import { IngestError } from './ingest/body'
 
 type Ctx = Context<{ Bindings: Env }>
@@ -75,15 +75,17 @@ async function limit(c: Ctx, site: IngestSite, who: string) {
   }
 }
 
-// A reporter's own pins on this page, proved by the host-signed identity token.
+// A reporter's own pins on this page: proved by the host-signed identity token,
+// or on a site open to guests by the id that guest's browser holds.
 pins.on(['GET', 'OPTIONS'], '/', async (c) => {
   const gated = await gate(c)
   if (gated instanceof Response) return gated
   const { site, pageKey, credential } = gated
   const token = credential('Bearer')
-  if (!token || token.length > IDENTITY_TOKEN_MAX)
-    throw new IngestError(401, 'invalid_identity', 'A signed identity token is required.')
-  const claims = await siteIdentity(c.env, site, token, Math.floor(Date.now() / 1000))
+  const guest = credential('Guest')
+  if ((!token && !guest) || (token && token.length > IDENTITY_TOKEN_MAX))
+    throw new IngestError(401, 'invalid_identity', 'A signed identity token or a reporter id is required.')
+  const claims = await reporterFor(c.env, site, { identity: token ?? undefined, guest }, Math.floor(Date.now() / 1000))
   await limit(c, site, claims.sub)
   if (!pageKey) throw invalidPage()
   // No reporter/account/owner parameter can widen this query. Dashboard owners

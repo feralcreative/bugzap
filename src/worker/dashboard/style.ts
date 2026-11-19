@@ -53,6 +53,10 @@ ul.rows li:first-child { border-top: 0; }
 .inline { display: flex; gap: .5rem; align-items: flex-end; flex-wrap: wrap; }
 .inline .grow { flex: 1 1 14rem; }
 .inline label { margin-top: 0; }
+fieldset { border: 0; padding: 0; margin: 1rem 0 0; }
+legend { font-weight: 600; padding: 0; margin-bottom: .3rem; }
+label.choice { display: flex; gap: .6rem; align-items: flex-start; font-weight: 400; margin: .5rem 0; }
+label.choice input { margin-top: .3rem; }
 .tabs { display: flex; gap: .4rem; flex-wrap: wrap; margin: 0 0 1rem; }
 .tabs a { padding: .35rem .75rem; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; color: var(--ink); background: var(--panel); }
 .tabs a[aria-current="page"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }

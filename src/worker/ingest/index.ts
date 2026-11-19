@@ -2,13 +2,16 @@ import { Hono } from 'hono'
 import { redactDiagnostics, scrubUrls } from '../../core/diagnostics'
 import { generateId, isPublicKey } from '../../core/ids'
 import { parseReportPayload } from '../../core/payload'
-import { SUBMIT_LIMIT, titleFrom } from '../../core/policy'
+import { GUEST_SITE_LIMIT, SUBMIT_LIMIT, titleFrom } from '../../core/policy'
 import { normalizeOrigin, urlKey } from '../../core/url'
-import { siteIdentity } from '../identity'
+import { reporterFor } from '../identity'
 import { notifyOwners } from '../notify'
-import { allowsOrigin, findIngestSite, hourlyCount, reportExists, saveReport } from '../db/scoped'
+import { allowsOrigin, findIngestSite, guestHourlyCount, hourlyCount, reportExists, saveReport } from '../db/scoped'
 import { checkRequestSize, IngestError, readPayloadPart, readReportForm } from './body'
 import { prepareImages } from './images'
+
+const obj = (v: unknown): Record<string, unknown> | null =>
+  v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
 
 const ingest = new Hono<{ Bindings: Env }>()
 
@@ -56,11 +59,34 @@ ingest.post('/', async (c) => {
     throw new IngestError(400, 'invalid_site_key', 'The site key does not match the request URL.')
 
   const now = Math.floor(Date.now() / 1000)
-  const claims = await siteIdentity(c.env, site, raw.identity, now)
-  const burst = await c.env.INGEST_BURST.limit({ key: JSON.stringify([site.public_key, claims.sub]) })
-  if (!burst.success) {
+  const limited = (): never => {
     c.header('Retry-After', '10')
     throw new IngestError(429, 'burst_limited', 'Please wait a few seconds before submitting again.')
+  }
+  // Counted by address before any token is examined: checking one costs a
+  // decryption and an HMAC, and a guest id costs nothing to replace.
+  const ip = c.req.header('CF-Connecting-IP') ?? 'unknown'
+  if (!(await c.env.INGEST_BURST.limit({ key: JSON.stringify([site.public_key, 'ip', ip]) })).success) limited()
+  // The reporter is settled from the raw fields, before the payload is parsed:
+  // nothing else in a request is read until it is known who is sending it.
+  const who = obj(raw.reporter)
+  const claims = await reporterFor(
+    c.env,
+    site,
+    {
+      identity: raw.identity,
+      guest: raw.guest,
+      reporter: {
+        ...(typeof who?.name === 'string' && { name: who.name }),
+        ...(typeof who?.email === 'string' && { email: who.email }),
+      },
+    },
+    now,
+  )
+  if (!(await c.env.INGEST_BURST.limit({ key: JSON.stringify([site.public_key, claims.sub]) })).success) limited()
+  if (claims.guest && (await guestHourlyCount(c.env.DB, site, now)) >= GUEST_SITE_LIMIT) {
+    c.header('Retry-After', '3600')
+    throw new IngestError(429, 'site_limited', 'This site has had a lot of reports this hour. Please try again later.')
   }
   if ((await hourlyCount(c.env.DB, site, claims.sub, now)) >= SUBMIT_LIMIT) {
     c.header('Retry-After', '3600')
@@ -69,6 +95,11 @@ ingest.post('/', async (c) => {
   const parsed = parseReportPayload(raw)
   if (!parsed.ok) throw new IngestError(400, 'invalid_payload', parsed.error)
   const payload = parsed.value
+  // The parsed payload carries the trimmed, validated name and email.
+  if (claims.guest) {
+    claims.name = payload.reporter?.name
+    claims.email = payload.reporter?.email
+  }
   let pageOrigin: string | null = null
   try {
     pageOrigin = normalizeOrigin(new URL(payload.page.url).origin)
@@ -139,6 +170,14 @@ ingest.post('/', async (c) => {
     if (error instanceof Error && error.message.includes('report_hourly_limit')) {
       c.header('Retry-After', '3600')
       throw new IngestError(429, 'hourly_limited', 'You can submit ten reports per site per hour.')
+    }
+    if (error instanceof Error && error.message.includes('guest_site_limit')) {
+      c.header('Retry-After', '3600')
+      throw new IngestError(
+        429,
+        'site_limited',
+        'This site has had a lot of reports this hour. Please try again later.',
+      )
     }
     console.error(
       JSON.stringify({ event: canClean ? 'ingest_storage_failed' : 'ingest_commit_unknown', report: publicId }),

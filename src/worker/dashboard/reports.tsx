@@ -1,5 +1,6 @@
 /** @jsxImportSource hono/jsx */
 import type { Hono } from 'hono'
+import { isGuestSubject } from '../../core/guest'
 import { isPublicId, isPublicKey } from '../../core/ids'
 import {
   isState,
@@ -41,8 +42,12 @@ const KIND_LABEL: Record<ReportKind, string> = { bug: 'Bug', idea: 'Idea', quest
 const PRIORITIES = ['P0', 'P1', 'P2', 'P3'] as const
 
 const when = (seconds: number) => new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'
-const who = (r: { reporter_name: string | null; reporter_email: string | null }) =>
-  r.reporter_name || r.reporter_email || 'Unnamed reporter'
+type Sender = { reporter_name: string | null; reporter_email: string | null; reporter_subject: string }
+// A guest's name is whatever they typed; the label keeps that in view wherever it appears.
+const who = (r: Sender) =>
+  isGuestSubject(r.reporter_subject)
+    ? `${r.reporter_name || r.reporter_email || 'A guest'} (guest)`
+    : r.reporter_name || r.reporter_email || 'Unnamed reporter'
 
 const missing = (c: Ctx) =>
   c.html(<MessagePage title="Not found" message="That report does not exist." user={c.get('user')} />, 404)
@@ -157,6 +162,9 @@ function ReportPage(props: { user: SessionUser; report: ReportDetail; error?: st
         )}{' '}
         · {when(r.created_at)}
       </p>
+      {isGuestSubject(r.reporter_subject) && (
+        <p class="hint">Sent by a guest. The name and email are what they typed and have not been&nbsp;verified.</p>
+      )}
 
       <div class="card">
         <p class="report-body">{r.body}</p>

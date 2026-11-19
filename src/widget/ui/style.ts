@@ -18,7 +18,7 @@ button:disabled { opacity: .6; cursor: wait; }
 h2 { font-size: 19px; line-height: 1.3; margin: 0 0 14px; }
 p { margin: 10px 0; }
 label { display: block; margin: 14px 0 5px; font-weight: 600; }
-textarea, select { display: block; width: 100%; padding: 9px; border: 1px solid #999; border-radius: 4px; background: white; }
+textarea, select, .who input { display: block; width: 100%; padding: 9px; border: 1px solid #999; border-radius: 4px; background: white; }
 textarea { min-height: 130px; resize: vertical; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .target { font-size: 13px; color: #555; }

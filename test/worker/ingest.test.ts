@@ -383,12 +383,20 @@ describe('site, identity and origin gates', () => {
 
 describe('limits, transactions and tenant integrity', () => {
   it('returns retry advice for burst limits before payload/image work', async () => {
-    const limit = vi.fn(async () => ({ success: false }))
+    // The address is counted first and let through here; the reporter is refused.
+    const limit = vi.fn(async ({ key }: { key: string }) => ({ success: key.includes('"ip"') }))
     const res = await submit(form(payload({ kind: 'invalid' })), {}, { INGEST_BURST: { limit } })
     await refusal(res, 429, 'burst_limited')
     expect(res.headers.get('retry-after')).toBe('10')
     expect(res.headers.get('access-control-expose-headers')).toBe('Retry-After')
-    expect(limit).toHaveBeenCalledWith({ key: JSON.stringify([publicKey, 'reporter']) })
+    expect(limit).toHaveBeenNthCalledWith(1, { key: JSON.stringify([publicKey, 'ip', 'unknown']) })
+    expect(limit).toHaveBeenNthCalledWith(2, { key: JSON.stringify([publicKey, 'reporter']) })
+
+    // An address over its limit is refused before the token is even looked at.
+    const all = vi.fn(async () => ({ success: false }))
+    const early = await submit(form(payload({ identity: 'not-a-token' })), {}, { INGEST_BURST: { limit: all } })
+    await refusal(early, 429, 'burst_limited')
+    expect(all).toHaveBeenCalledTimes(1)
     expect(await rows('reports')).toHaveLength(0)
   })
 

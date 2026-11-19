@@ -8,7 +8,8 @@ export function watchPins(
   win: Window,
   api: string,
   site: string,
-  identity: string | undefined,
+  /** The reporter's own credential, as an Authorization value: a signed token or a guest id. */
+  auth: string | undefined,
   render: (pins: PinPlacement[], truncated: boolean) => void,
   /** An owner's "Open on page" token and what to do once its pin has loaded. */
   view?: { token: string; found: (id: string) => void },
@@ -89,8 +90,8 @@ export function watchPins(
       // not cost a reporter their own pins, and a stale identity must not hide
       // the one pin an owner came to see.
       const [raw, viewed] = await Promise.all([
-        identity
-          ? load('', `Bearer ${identity}`).catch((error: unknown) => {
+        auth
+          ? load('', auth).catch((error: unknown) => {
               if (!view) throw error
               return { pins: [] }
             })

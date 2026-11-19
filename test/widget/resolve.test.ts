@@ -80,7 +80,7 @@ it('coalesces DOM rebuilds without refetching and restores history on disposal',
   vi.stubGlobal('fetch', fetch)
   const render = vi.fn()
   const original = window.history.pushState
-  const watcher = watchPins(window, 'https://collector.example', 'site', 'identity', render)
+  const watcher = watchPins(window, 'https://collector.example', 'site', 'Bearer identity', render)
   await vi.waitFor(() => expect(watcher.get('ABCDEFGHIJKLMNOPQRSTUV')?.resolution.element).toBe(el))
   let replacement = el
   for (let n = 0; n < 20; n++) {
@@ -104,7 +104,7 @@ it('ignores a late read after disposal', async () => {
       }),
   )
   const render = vi.fn()
-  const watcher = watchPins(window, 'https://collector.example', 'site', 'identity', render)
+  const watcher = watchPins(window, 'https://collector.example', 'site', 'Bearer identity', render)
   watcher.dispose()
   finish(new Response(JSON.stringify({ pins: [] })))
   await Promise.resolve()
@@ -122,7 +122,7 @@ it('refetches on SPA paths, excludes query secrets and discards a stale route re
   )
   const original = window.location.href
   const render = vi.fn()
-  const watcher = watchPins(window, 'https://collector.example', 'site', 'identity', render)
+  const watcher = watchPins(window, 'https://collector.example', 'site', 'Bearer identity', render)
   try {
     window.history.pushState({}, '', '/next?token=secret#private')
     expect(requests).toHaveLength(2)
