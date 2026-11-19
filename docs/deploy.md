@@ -7,7 +7,7 @@ Bugzap deploys as a Cloudflare Worker with Wrangler, to two environments on the 
 | Staging     | `./utils/deploy/stage.sh` | `bugzap-staging` | `bugzap-staging`    | `bugzap-shots-staging`    |
 | Production  | `./utils/deploy/prod.sh`  | `bugzap`         | `bugzap-production` | `bugzap-shots-production` |
 
-As of 2026-11-18 neither environment exists yet, and only `--dry-run` has been exercised: Wrangler's login on this machine had expired, so no command here has been run against Cloudflare.
+Staging was first deployed on 2026-11-18 and answers at <https://bugzap-staging.ziad-af.workers.dev>. Production does not exist yet. One thing the first setup turned up: R2 has to be enabled once for the account in the Cloudflare dashboard before any bucket can be created, and when `wrangler d1 create` or `wrangler r2 bucket create` offers to add the binding to the config on your behalf, answer no, because it rewrites `wrangler.jsonc` and adds a stray top-level binding.
 
 ## The scripts
 
