@@ -2,9 +2,10 @@ import { Hono } from 'hono'
 import { redactDiagnostics, scrubUrls } from '../../core/diagnostics'
 import { generateId, isPublicKey } from '../../core/ids'
 import { parseReportPayload } from '../../core/payload'
-import { SUBMIT_LIMIT } from '../../core/policy'
+import { SUBMIT_LIMIT, titleFrom } from '../../core/policy'
 import { normalizeOrigin, urlKey } from '../../core/url'
 import { siteIdentity } from '../identity'
+import { notifyOwners } from '../notify'
 import { allowsOrigin, findIngestSite, hourlyCount, reportExists, saveReport } from '../db/scoped'
 import { checkRequestSize, IngestError, readPayloadPart, readReportForm } from './body'
 import { prepareImages } from './images'
@@ -82,6 +83,26 @@ ingest.post('/', async (c) => {
   const publicId = generateId()
   const images = await prepareImages(form, payload, site, publicId)
   const diagnostics = redactDiagnostics(payload.diagnostics)
+  // Runs after the commit and off the response path: the reporter's confirmation
+  // never waits on mail, and notifyOwners cannot throw.
+  const announce = () => {
+    const notice = notifyOwners(c.env, {
+      accountId: site.account_id,
+      siteId: site.id,
+      publicId,
+      kind: payload.kind,
+      title: titleFrom(payload.body),
+      body: payload.body,
+      reporter: claims.name || claims.email || 'Someone',
+      pageUrl: pageKey,
+      origin: new URL(c.req.url).origin,
+    })
+    try {
+      c.executionCtx.waitUntil(notice)
+    } catch {
+      // No execution context (a direct call in a test): the promise still settles.
+    }
+  }
   const attemptedKeys: string[] = []
   let writingDatabase = false
   try {
@@ -103,7 +124,10 @@ ingest.post('/', async (c) => {
         canClean = false
       }
     }
-    if (committed) return c.json({ ok: true, id: publicId }, 201)
+    if (committed) {
+      announce()
+      return c.json({ ok: true, id: publicId }, 201)
+    }
     if (canClean && attemptedKeys.length) {
       try {
         await c.env.SHOTS.delete(attemptedKeys)
@@ -121,6 +145,7 @@ ingest.post('/', async (c) => {
     )
     throw new IngestError(503, 'storage_unavailable', 'The report could not be saved. Please try again.')
   }
+  announce()
   return c.json({ ok: true, id: publicId }, 201)
 })
 
