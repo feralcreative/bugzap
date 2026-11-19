@@ -30,6 +30,8 @@ export default defineConfig({
                 TEST_MIGRATIONS: await readD1Migrations('./migrations'),
                 SITE_KEK: randomBytes(32).toString('base64url'),
                 SIGNUP_ALLOWLIST: 'owner@allowed.example, @team.example',
+                GOOGLE_CLIENT_ID: 'test-client.apps.googleusercontent.com',
+                GOOGLE_CLIENT_SECRET: 'test-client-secret',
               },
             },
           }),

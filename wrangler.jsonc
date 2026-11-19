@@ -38,8 +38,9 @@
   ],
 
   // SIGNUP_ALLOWLIST: addresses and @domains that may sign in to the dashboard,
-  // comma-separated. Empty admits nobody.
-  "secrets": { "required": ["SITE_KEK", "SIGNUP_ALLOWLIST"] },
+  // comma-separated. Empty admits nobody. The two GOOGLE_ values are the OAuth
+  // client that "Sign in with Google" uses.
+  "secrets": { "required": ["SITE_KEK", "SIGNUP_ALLOWLIST", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"] },
 
   "ratelimits": [
     {
@@ -52,19 +53,13 @@
       "namespace_id": "2833002",
       "simple": { "limit": 60, "period": 60 },
     },
-    {
-      // Sign-in link requests, counted per IP address and per email address.
-      "name": "LOGIN_BURST",
-      "namespace_id": "2833003",
-      "simple": { "limit": 5, "period": 60 },
-    },
   ],
 
   // Hourly cleanup: expired sign-in links and sessions, and unclaimed screenshots.
   "triggers": { "crons": ["17 * * * *"] },
 
   "vars": {
-    // console prints mail to the terminal; cloudflare sends it (needs a sending domain).
+    // console writes new-report notices to the log; cloudflare will send them once a sending domain exists.
     "MAIL_MODE": "console",
   },
 
@@ -94,11 +89,10 @@
         },
       ],
       "r2_buckets": [{ "binding": "SHOTS", "bucket_name": "bugzap-shots-staging" }],
-      "secrets": { "required": ["SITE_KEK", "SIGNUP_ALLOWLIST"] },
+      "secrets": { "required": ["SITE_KEK", "SIGNUP_ALLOWLIST", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"] },
       "ratelimits": [
         { "name": "INGEST_BURST", "namespace_id": "283311", "simple": { "limit": 5, "period": 10 } },
         { "name": "PINS_READ", "namespace_id": "283312", "simple": { "limit": 60, "period": 60 } },
-        { "name": "LOGIN_BURST", "namespace_id": "283313", "simple": { "limit": 5, "period": 60 } },
       ],
       "vars": { "MAIL_MODE": "console" },
     },
@@ -119,11 +113,10 @@
         },
       ],
       "r2_buckets": [{ "binding": "SHOTS", "bucket_name": "bugzap-shots-production" }],
-      "secrets": { "required": ["SITE_KEK", "SIGNUP_ALLOWLIST"] },
+      "secrets": { "required": ["SITE_KEK", "SIGNUP_ALLOWLIST", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"] },
       "ratelimits": [
         { "name": "INGEST_BURST", "namespace_id": "283321", "simple": { "limit": 5, "period": 10 } },
         { "name": "PINS_READ", "namespace_id": "283322", "simple": { "limit": 60, "period": 60 } },
-        { "name": "LOGIN_BURST", "namespace_id": "283323", "simple": { "limit": 5, "period": 60 } },
       ],
       "vars": { "MAIL_MODE": "console" },
     },

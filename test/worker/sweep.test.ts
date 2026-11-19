@@ -1,6 +1,5 @@
 import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { generateToken, hashToken } from '../../src/worker/auth/tokens'
 import { findIngestSite } from '../../src/worker/db/scoped'
 import { ORPHAN_AGE_S, sweep } from '../../src/worker/sweep'
 import { jpeg } from '../core/fixtures/images'
@@ -16,45 +15,20 @@ const exists = async (sql: string, ...binds: unknown[]) =>
     .bind(...binds)
     .first())
 
-it('removes expired sign-in state and keeps what is live', async () => {
+it('removes expired sessions and keeps live ones and their owners', async () => {
   const me = await owner()
   const stale = await owner()
   await env.DB.prepare('UPDATE sessions SET expires_at = ? WHERE user_id = ?')
     .bind(now() - 1, stale.userId)
     .run()
-  const [liveLink, deadLink] = [await hashToken(generateToken()), await hashToken(generateToken())]
-  await env.DB.batch([
-    env.DB.prepare('INSERT INTO login_tokens (token_hash, user_id, expires_at) VALUES (?, ?, ?)').bind(
-      liveLink,
-      me.userId,
-      now() + 600,
-    ),
-    env.DB.prepare('INSERT INTO login_tokens (token_hash, user_id, expires_at) VALUES (?, ?, ?)').bind(
-      deadLink,
-      me.userId,
-      now() - 600,
-    ),
-    // Three addresses that asked for a link: long ago, long ago with a live link, and just now.
-    env.DB.prepare('INSERT INTO users (email, created_at) VALUES (?, ?)').bind('gone@sweep.example', now() - 90000),
-    env.DB.prepare('INSERT INTO users (email, created_at) VALUES (?, ?)').bind('waiting@sweep.example', now() - 90000),
-    env.DB.prepare('INSERT INTO users (email, created_at) VALUES (?, ?)').bind('fresh@sweep.example', now()),
-    env.DB.prepare(
-      'INSERT INTO login_tokens (token_hash, user_id, expires_at) SELECT ?, id, ? FROM users WHERE email = ?',
-    ).bind(await hashToken(generateToken()), now() + 600, 'waiting@sweep.example'),
-  ])
 
   const counts = await sweep(env, now())
-  expect(counts.login_tokens).toBeGreaterThanOrEqual(1)
   expect(counts.sessions).toBeGreaterThanOrEqual(1)
-  expect(await exists('SELECT 1 FROM login_tokens WHERE token_hash = ?', liveLink)).toBe(true)
-  expect(await exists('SELECT 1 FROM login_tokens WHERE token_hash = ?', deadLink)).toBe(false)
   expect(await exists('SELECT 1 FROM sessions WHERE user_id = ?', me.userId)).toBe(true)
   expect(await exists('SELECT 1 FROM sessions WHERE user_id = ?', stale.userId)).toBe(false)
-  expect(await exists('SELECT 1 FROM users WHERE email = ?', 'gone@sweep.example')).toBe(false)
-  expect(await exists('SELECT 1 FROM users WHERE email = ?', 'waiting@sweep.example')).toBe(true)
-  expect(await exists('SELECT 1 FROM users WHERE email = ?', 'fresh@sweep.example')).toBe(true)
   // An owner whose session expired still has their account.
   expect(await exists('SELECT 1 FROM users WHERE id = ?', stale.userId)).toBe(true)
+  expect(await exists('SELECT 1 FROM memberships WHERE user_id = ?', stale.userId)).toBe(true)
   expect((await call('/sites', { cookie: me.cookie })).status).toBe(200)
 })
 

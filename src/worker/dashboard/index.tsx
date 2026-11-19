@@ -5,24 +5,23 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { generateId, generatePublicKey, generateSecretKey, isPublicKey } from '../../core/ids'
 import { ORIGINS_MAX, SECRET_GRACE_S, SITE_NAME_MAX, SITES_MAX } from '../../core/policy'
 import { normalizeOrigin } from '../../core/url'
-import { isAllowed, normalizeEmail } from '../auth/allowlist'
+import { isAllowed } from '../auth/allowlist'
+import { authorizeUrl, FLOW_TTL_S, googleIdentity, newFlow, packFlow, parseFlow } from '../auth/google'
 import { generateToken, hashToken, isToken } from '../auth/tokens'
 import { encryptSiteSecret } from '../crypto'
 import {
-  consumeLoginToken,
-  createLoginToken,
   deleteSession,
+  endSessionsFor,
   findSession,
-  loginTokenIsLive,
+  openGoogleSession,
   SESSION_TTL_S,
   type SessionUser,
 } from '../db/auth'
 import { accountSite, accountSites, addSiteOrigin, createSite, removeSiteOrigin, rotateSiteSecret } from '../db/scoped'
-import { sendMail } from '../mail'
 import { type App, type Ctx, now } from './context'
 import { addReportRoutes } from './reports'
 import { dashboardCss } from './style'
-import { ConfirmPage, LinkSentPage, LoginPage, MessagePage, SitePage, SitesPage } from './views'
+import { LoginPage, MessagePage, SitePage, SitesPage } from './views'
 
 const dashboard = new Hono<App>()
 
@@ -33,8 +32,8 @@ function cookieName(c: Ctx): string {
   return new URL(c.req.url).protocol === 'https:' ? '__Host-bz_session' : 'bz_session'
 }
 
-// The allowlist is rechecked on every request, not only when a link is requested:
-// taking an address off it ends that owner's sessions and unused links at once.
+// The allowlist is rechecked on every request, not only at sign-in: taking an
+// address off it ends that owner's sessions at once.
 async function currentUser(c: Ctx): Promise<SessionUser | null> {
   const token = getCookie(c, cookieName(c))
   if (!isToken(token)) return null
@@ -43,9 +42,9 @@ async function currentUser(c: Ctx): Promise<SessionUser | null> {
 }
 
 // No script runs on any dashboard page, so the CSP allows none. The referrer
-// policy keeps the confirm page's URL, which carries the login token, from ever
-// reaching another origin. It must not be `no-referrer`: under that policy a
-// browser sends `Origin: null` on the page's own form posts.
+// policy keeps dashboard URLs, including the sign-in callback's one-time code,
+// from reaching another origin. It must not be `no-referrer`: under that policy
+// a browser sends `Origin: null` on the page's own form posts.
 const guard: MiddlewareHandler<App> = async (c, next) => {
   c.header('Cache-Control', 'no-store')
   c.header('X-Content-Type-Options', 'nosniff')
@@ -104,73 +103,71 @@ async function field(c: Ctx, name: string): Promise<string> {
 
 dashboard.get('/login', async (c) => ((await currentUser(c)) ? c.redirect('/sites', 303) : c.html(<LoginPage />)))
 
-dashboard.post('/login', async (c) => {
-  const raw = await field(c, 'email')
-  const email = normalizeEmail(raw)
-  if (!email) return c.html(<LoginPage error="Enter a valid email address." email={raw.slice(0, 254)} />, 400)
-  const ip = c.req.header('CF-Connecting-IP') ?? 'unknown'
-  const limits = await Promise.all([
-    c.env.LOGIN_BURST.limit({ key: `ip:${ip}` }),
-    c.env.LOGIN_BURST.limit({ key: `email:${email}` }),
-  ])
-  if (limits.some((l) => !l.success)) {
-    c.header('Retry-After', '60')
-    return c.html(<LoginPage error="Too many attempts. Wait a minute and try again." email={email} />, 429)
-  }
-  if (isAllowed(email, c.env.SIGNUP_ALLOWLIST)) {
-    // A storage failure here must look like every other answer, or a 503 would
-    // say the address is on the allowlist.
-    try {
-      const token = generateToken()
-      const created = await createLoginToken(c.env.DB, { email, tokenHash: await hashToken(token), now: now() })
-      if (created) {
-        const link = `${new URL(c.req.url).origin}/login/confirm?token=${token}`
-        await sendMail(c.env, {
-          to: email,
-          subject: 'Your Bugzap sign-in link',
-          text: `Open this link to sign in to Bugzap. It works once and expires in 15 minutes.\n\n${link}\n\nIf you did not ask for it, ignore this message.`,
-        })
-      }
-    } catch {
-      console.error(JSON.stringify({ event: 'login_link_failed' }))
-    }
-  }
-  return c.html(<LinkSentPage />)
+// The flow cookie follows the session cookie's naming rule, and for the same reason.
+const flowCookie = (c: Ctx) => (new URL(c.req.url).protocol === 'https:' ? '__Host-bz_oauth' : 'bz_oauth')
+const callbackUrl = (c: Ctx) => `${new URL(c.req.url).origin}/login/google/callback`
+
+const refused = (c: Ctx, message: string, status: 400 | 403 | 503 = 400) =>
+  c.html(<LoginPage error={message} />, status)
+
+// A plain link starts the flow, not a form: the page's CSP limits form posts to
+// this origin, and the next stop is Google.
+dashboard.get('/login/google', async (c) => {
+  if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET)
+    return refused(c, 'Google sign-in is not set up on this server.', 503)
+  const flow = newFlow()
+  const name = flowCookie(c)
+  // Lax, not Strict: the callback is a navigation that arrives from Google.
+  setCookie(c, name, packFlow(flow), {
+    path: '/',
+    httpOnly: true,
+    secure: name.startsWith('__Host-'),
+    sameSite: 'Lax',
+    maxAge: FLOW_TTL_S,
+  })
+  return c.redirect(await authorizeUrl(c.env.GOOGLE_CLIENT_ID, callbackUrl(c), flow), 302)
 })
 
-const expired = (c: Ctx) =>
-  c.html(
-    <MessagePage
-      title="Link expired"
-      message="That sign-in link has expired or was already used. Ask for a new one."
-    />,
-    400,
-  )
+dashboard.get('/login/google/callback', async (c) => {
+  const name = flowCookie(c)
+  const flow = parseFlow(getCookie(c, name))
+  const state = c.req.query('state')
+  const code = c.req.query('code')
+  // The state must be the one this browser was given, checked before anything
+  // else in the request is believed. Comparing hashes keeps the comparison from
+  // leaking how much of a guess was right.
+  if (!flow || !isToken(state) || (await hashToken(state)) !== (await hashToken(flow.state)))
+    return refused(c, 'That sign-in attempt has expired. Try again.')
+  // Single use from here on, whatever happens next. A request with the wrong
+  // state leaves the cookie alone, so a stray link cannot cancel a sign-in that
+  // is under way in another tab.
+  deleteCookie(c, name, { path: '/', secure: name.startsWith('__Host-') })
+  if (c.req.query('error')) return refused(c, 'Google sign-in was cancelled. Try again.')
+  if (typeof code !== 'string' || !code || code.length > 2048) return refused(c, 'Google sign-in failed. Try again.')
 
-// A GET only shows the button. Mail scanners and link previews follow links;
-// they do not press buttons, so they cannot spend the token.
-dashboard.get('/login/confirm', async (c) => {
-  const token = c.req.query('token')
-  if (!isToken(token) || !(await loginTokenIsLive(c.env.DB, await hashToken(token), now()))) return expired(c)
-  return c.html(<ConfirmPage token={token} />)
-})
+  const identity = await googleIdentity(c.env, { code, redirectUri: callbackUrl(c), flow, now: now() })
+  if (!identity) return refused(c, 'Google sign-in failed. Try again.')
+  if (!isAllowed(identity.email, c.env.SIGNUP_ALLOWLIST)) {
+    // Someone already known here whose address has moved off the allowlist: the
+    // per-request check reads the address on file, which is now out of date, so
+    // their older sessions are ended here.
+    await endSessionsFor(c.env.DB, identity.sub)
+    return refused(c, 'That Google account cannot sign in to Bugzap.', 403)
+  }
 
-dashboard.post('/login/confirm', async (c) => {
-  const token = await field(c, 'token')
-  if (!isToken(token)) return expired(c)
   const session = generateToken()
-  const opened = await consumeLoginToken(c.env.DB, {
-    tokenHash: await hashToken(token),
+  const opened = await openGoogleSession(c.env.DB, {
+    ...identity,
     sessionHash: await hashToken(session),
     accountPublicId: generateId(),
     now: now(),
   })
-  if (!opened) return expired(c)
-  const name = cookieName(c)
-  setCookie(c, name, session, {
+  if (!opened) return refused(c, 'That Google account cannot sign in to Bugzap.', 403)
+  const sessionName = cookieName(c)
+  setCookie(c, sessionName, session, {
     path: '/',
     httpOnly: true,
-    secure: name.startsWith('__Host-'),
+    secure: sessionName.startsWith('__Host-'),
     sameSite: 'Lax',
     maxAge: SESSION_TTL_S,
   })

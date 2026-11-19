@@ -1,8 +1,7 @@
-// Outgoing mail. `console` prints the message to the Worker's log, which is the
-// terminal in dev and `wrangler tail` on a deployed Worker; that is how an owner
-// gets a sign-in link until a sending domain exists. `cloudflare` will send through
-// Email Service once that domain's SPF and DKIM records are in place (a DNS change,
-// so not part of v1).
+// Outgoing mail, which today is only the new-report notice to a site's owners.
+// `console` writes the message to the Worker's log: the terminal in dev and
+// `wrangler tail` on a deployed Worker. `cloudflare` will send through Email
+// Service once a sending domain's SPF and DKIM records exist (a DNS change).
 
 export type Mail = {
   to: string

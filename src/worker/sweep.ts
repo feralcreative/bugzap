@@ -70,34 +70,11 @@ export async function sweep(env: Pick<Env, 'DB' | 'SHOTS'>, now: number): Promis
           .run(),
       )
   await step(
-    'login_tokens',
-    counts,
-    run(
-      'DELETE FROM login_tokens WHERE rowid IN (SELECT rowid FROM login_tokens WHERE expires_at <= ? LIMIT ?)',
-      now,
-      SWEEP_ROWS,
-    ),
-  )
-  await step(
     'sessions',
     counts,
     run(
       'DELETE FROM sessions WHERE rowid IN (SELECT rowid FROM sessions WHERE expires_at <= ? LIMIT ?)',
       now,
-      SWEEP_ROWS,
-    ),
-  )
-  // A user row is made when a sign-in link is requested. One that never signed in
-  // (no account) and has no link left is an address someone typed once.
-  await step(
-    'users',
-    counts,
-    run(
-      `DELETE FROM users WHERE id IN (SELECT u.id FROM users u WHERE u.created_at <= ?
-      AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = u.id)
-      AND NOT EXISTS (SELECT 1 FROM login_tokens t WHERE t.user_id = u.id)
-      AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = u.id) LIMIT ?)`,
-      now - ORPHAN_AGE_S,
       SWEEP_ROWS,
     ),
   )

@@ -33,7 +33,7 @@ export function call(path: string, options: Options = {}) {
   }
   return app.fetch(
     new Request(base + path, { method, headers, body, redirect: 'manual' }),
-    { ...env, LOGIN_BURST: open, INGEST_BURST: open, ...options.env },
+    { ...env, INGEST_BURST: open, ...options.env },
     createExecutionContext(),
   )
 }

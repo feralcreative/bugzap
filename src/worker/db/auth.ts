@@ -1,89 +1,75 @@
-// Sign-in state: users, login tokens, and sessions. None of it is tenant data, so
-// it lives outside scoped.ts; the session lookup is what yields the account id that
-// every scoped query then carries.
+// Sign-in state: users and sessions. None of it is tenant data, so it lives
+// outside scoped.ts; the session lookup is what yields the account id that every
+// scoped query then carries.
 
-export const LOGIN_TOKEN_TTL_S = 15 * 60
 export const SESSION_TTL_S = 30 * 24 * 60 * 60
-/** Unconsumed links one address may hold at once. The rate-limit binding is
- *  eventually consistent across locations; this count is not. */
-export const LOGIN_TOKENS_MAX = 5
 
 export type SessionUser = { userId: number; email: string; accountId: number; accountName: string }
 
 /**
- * Stores a login token for an allowlisted address. Returns false when the address
- * already holds too many live links. Only a bare user row is created here; the
- * account waits until the link is used, so asking for links to addresses nobody
- * controls cannot fill the database with tenants.
+ * Opens a session for a person Google has just vouched for, creating the user
+ * and their account on first sign-in. Returns false when the address already
+ * belongs to a different Google identity: an address reassigned to someone new
+ * must not inherit the previous holder's account.
+ *
+ * A user is matched by Google's stable id first. Matching by address happens
+ * only for a row that has never been tied to an identity (the locally seeded
+ * owner, or anything from before Google sign-in), and ties it.
  */
-export async function createLoginToken(
+export async function openGoogleSession(
   db: D1Database,
-  input: { email: string; tokenHash: string; now: number },
+  input: {
+    sub: string
+    email: string
+    name: string | null
+    sessionHash: string
+    accountPublicId: string
+    now: number
+  },
 ): Promise<boolean> {
-  const { email, tokenHash, now } = input
+  const { sub, email, name, sessionHash, accountPublicId, now } = input
+  const known = await db.prepare('SELECT id FROM users WHERE google_sub = ?').bind(sub).first<{ id: number }>()
+  const identify = known
+    ? // The address may have changed at Google. Follow it unless another user has it.
+      db
+        .prepare(
+          `UPDATE users SET email = ?1 WHERE id = ?2
+        AND NOT EXISTS (SELECT 1 FROM users o WHERE o.email = ?1 AND o.id != ?2)`,
+        )
+        .bind(email, known.id)
+    : db
+        .prepare(
+          `INSERT INTO users (email, name, google_sub, created_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT (email) DO UPDATE SET google_sub = excluded.google_sub, name = coalesce(users.name, excluded.name)
+        WHERE users.google_sub IS NULL`,
+        )
+        .bind(email, name, sub, now)
+  // One batch, so two first sign-ins at once cannot create two accounts. Every
+  // later statement finds the user by `sub`: if the address was already tied to
+  // another identity, the statement above changed nothing and these find no one.
   const results = await db.batch([
-    db.prepare('INSERT INTO users (email) VALUES (?) ON CONFLICT (email) DO NOTHING').bind(email),
-    db
-      .prepare('DELETE FROM login_tokens WHERE user_id = (SELECT id FROM users WHERE email = ?) AND expires_at <= ?')
-      .bind(email, now),
-    db
-      .prepare(
-        `INSERT INTO login_tokens (token_hash, user_id, expires_at, created_at)
-      SELECT ?, u.id, ?, ? FROM users u WHERE u.email = ? AND
-      (SELECT count(*) FROM login_tokens t WHERE t.user_id = u.id AND t.consumed_at IS NULL) < ?`,
-      )
-      .bind(tokenHash, now + LOGIN_TOKEN_TTL_S, now, email, LOGIN_TOKENS_MAX),
-  ])
-  return (results[2]?.meta.changes ?? 0) === 1
-}
-
-/** True while the token could still be consumed. Reading it changes nothing, so
- *  an email scanner following the link does not burn it. */
-export async function loginTokenIsLive(db: D1Database, tokenHash: string, now: number): Promise<boolean> {
-  return !!(await db
-    .prepare('SELECT 1 FROM login_tokens WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > ?')
-    .bind(tokenHash, now)
-    .first())
-}
-
-/**
- * Consumes a login token and opens a session. The UPDATE is the single-use gate:
- * only one request can flip `consumed_at`, so a token that was already used,
- * expired, or never existed opens nothing. The first successful sign-in also
- * creates the user's account, in the same batch as the session, so two links used
- * at once cannot create two accounts. If that batch fails the token stays spent
- * and the owner asks for a new link, which is the safe way round.
- */
-export async function consumeLoginToken(
-  db: D1Database,
-  input: { tokenHash: string; sessionHash: string; accountPublicId: string; now: number },
-): Promise<boolean> {
-  const { tokenHash, sessionHash, accountPublicId, now } = input
-  const used = await db
-    .prepare(
-      `UPDATE login_tokens SET consumed_at = ? WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > ?
-    RETURNING user_id`,
-    )
-    .bind(now, tokenHash, now)
-    .first<{ user_id: number }>()
-  if (!used) return false
-  await db.batch([
+    identify,
     db
       .prepare(
         `INSERT INTO accounts (public_id, name)
       SELECT ?, substr(u.email, 1, instr(u.email, '@') - 1) FROM users u
-      WHERE u.id = ? AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = u.id)`,
+      WHERE u.google_sub = ? AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = u.id)`,
       )
-      .bind(accountPublicId, used.user_id),
-    // Selects nothing when the user already had an account and none was made above.
+      .bind(accountPublicId, sub),
     db
-      .prepare('INSERT INTO memberships (account_id, user_id) SELECT id, ? FROM accounts WHERE public_id = ?')
-      .bind(used.user_id, accountPublicId),
+      .prepare(
+        `INSERT INTO memberships (account_id, user_id)
+      SELECT a.id, u.id FROM accounts a, users u WHERE a.public_id = ? AND u.google_sub = ?`,
+      )
+      .bind(accountPublicId, sub),
     db
-      .prepare('INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
-      .bind(sessionHash, used.user_id, now + SESSION_TTL_S, now),
+      .prepare(
+        `INSERT INTO sessions (token_hash, user_id, expires_at, created_at)
+      SELECT ?, u.id, ?, ? FROM users u WHERE u.google_sub = ?`,
+      )
+      .bind(sessionHash, now + SESSION_TTL_S, now, sub),
   ])
-  return true
+  return (results[3]?.meta.changes ?? 0) === 1
 }
 
 /** The signed-in user and the one account they own. v1 gives each user a single
@@ -100,6 +86,11 @@ export function findSession(db: D1Database, sessionHash: string, now: number): P
     )
     .bind(sessionHash, now)
     .first<SessionUser>()
+}
+
+/** Ends every session of the person with this Google id, if there is one. */
+export async function endSessionsFor(db: D1Database, sub: string): Promise<void> {
+  await db.prepare('DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE google_sub = ?)').bind(sub).run()
 }
 
 export async function deleteSession(db: D1Database, sessionHash: string): Promise<void> {

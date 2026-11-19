@@ -170,6 +170,6 @@ echo -e "${CYAN}╚════════════════════�
 if [ -z "${DRY_RUN:-}" ]; then
   echo ""
   echo -e "${YELLOW}Useful commands:${NC}"
-  echo "  Tail logs (sign-in links print here):  npx wrangler tail ${WORKER}"
+  echo "  Tail logs:  npx wrangler tail ${WORKER}"
   echo ""
 fi

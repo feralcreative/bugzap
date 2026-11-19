@@ -1,6 +1,7 @@
-// Prints a dashboard sign-in link for the locally seeded owner, without mail.
-// Local Wrangler data only; there is intentionally no remote mode. The Worker
-// stores a SHA-256 of the token, exactly as src/worker/auth/tokens.ts makes it.
+// Signs the locally seeded owner in to the local dashboard without Google, by
+// creating a session directly. Local Wrangler data only; there is intentionally
+// no remote mode. The Worker stores a SHA-256 of the session token, exactly as
+// src/worker/auth/tokens.ts makes it.
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -17,8 +18,8 @@ try {
     const file = join(directory, 'login.sql')
     await writeFile(
       file,
-      `INSERT INTO login_tokens (token_hash, user_id, expires_at)
-  SELECT '${hash}', id, unixepoch() + 900 FROM users WHERE email = '${email}';\n`,
+      `INSERT INTO sessions (token_hash, user_id, expires_at)
+  SELECT '${hash}', id, unixepoch() + 86400 FROM users WHERE email = '${email}';\n`,
       { mode: 0o600, flag: 'wx' },
     )
     wranglerLocal(['d1', 'execute', 'bugzap', '--local', '--file', file])
@@ -26,9 +27,11 @@ try {
     await rm(directory, { recursive: true, force: true })
   }
   const port = process.env.npm_package_config_port ?? '2833'
-  console.log(`\nSign in as ${seed.email} (works once, for 15 minutes):`)
-  console.log(`http://localhost:${port}/login/confirm?token=${token}`)
-  console.log('If the page says the link expired, run npm run setup:local and try again.')
+  console.log(`\nA one-day local session for ${seed.email} is ready.`)
+  console.log(`Open http://localhost:${port}/login, paste this into the browser console, then reload:\n`)
+  console.log(`document.cookie = 'bz_session=${token}; path=/; max-age=86400'\n`)
+  console.log(`For curl: -H 'Cookie: bz_session=${token}'`)
+  console.log('If the dashboard still asks you to sign in, run npm run setup:local and try again.')
 } catch (error) {
   console.error(error.code === 'ENOENT' ? 'Run npm run setup:local first.' : error.message)
   process.exitCode = 1

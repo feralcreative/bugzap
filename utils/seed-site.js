@@ -37,9 +37,13 @@ try {
     await writePrivate(SEED_FILE, JSON.stringify(seed, null, 2) + '\n')
     seed = await readSeed()
   }
-  // Lets the seeded owner sign in to the local dashboard; the link prints in the
-  // terminal running the Worker because MAIL_MODE is console.
+  // The dashboard rechecks the allowlist on every request, so the seeded owner
+  // must be on it for a local session (npm run login:local) to work.
   const allowlisted = await ensureLocalVar('SIGNUP_ALLOWLIST', seed.email)
+  // Empty until a Google OAuth client is set up for localhost (docs/dashboard.md).
+  // With them empty the sign-in page says so, and npm run login:local still works.
+  await ensureLocalVar('GOOGLE_CLIENT_ID', '')
+  await ensureLocalVar('GOOGLE_CLIENT_SECRET', '')
   const cipher = await core.encryptSiteSecret(seed.secret, kek, seed.site)
   const quote = (value) => "'" + value.replaceAll("'", "''") + "'"
   // Build the seed in a private temporary file: neither the signing key nor its

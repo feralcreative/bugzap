@@ -39,54 +39,21 @@ export function Page({ title, user, narrow, children }: PageProps) {
   )
 }
 
-export function LoginPage({ error, email }: { error?: string; email?: string }) {
+export function LoginPage({ error }: { error?: string }) {
   return (
     <Page title="Sign in" narrow>
       <h1>Sign in</h1>
-      <p>Enter your email and we will send you a link that signs you&nbsp;in.</p>
-      <form method="post" action="/login" class="card">
-        {error && (
-          <p class="error" role="alert">
-            {error}
-          </p>
-        )}
-        <label for="email">Email</label>
-        <input id="email" name="email" type="email" required autocomplete="email" maxlength={254} value={email} />
-        <div class="actions">
-          <button type="submit" class="primary">
-            Email me a link
-          </button>
-        </div>
-      </form>
-    </Page>
-  )
-}
-
-/** Shown for every well-formed address, allowed or not, so the page never says
- *  who is on the allowlist. */
-export function LinkSentPage() {
-  return (
-    <Page title="Check your email" narrow>
-      <h1>Check your email</h1>
-      <p>If that address can sign in, a link is on its way. It works once and expires in 15&nbsp;minutes.</p>
+      {error && (
+        <p class="error" role="alert">
+          {error}
+        </p>
+      )}
+      <p>Bugzap uses your Google account to sign you&nbsp;in.</p>
       <p>
-        <a href="/login">Use a different address</a>
+        <a class="button primary" href="/login/google">
+          Sign in with Google
+        </a>
       </p>
-    </Page>
-  )
-}
-
-export function ConfirmPage({ token }: { token: string }) {
-  return (
-    <Page title="Finish signing in" narrow>
-      <h1>Finish signing in</h1>
-      <p>Press the button to sign in on this&nbsp;device.</p>
-      <form method="post" action="/login/confirm">
-        <input type="hidden" name="token" value={token} />
-        <button type="submit" class="primary">
-          Sign in
-        </button>
-      </form>
     </Page>
   )
 }

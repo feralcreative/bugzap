@@ -33,7 +33,8 @@ label { display: block; font-weight: 600; margin: 1rem 0 .3rem; }
 input[type="email"], input[type="text"], input[type="url"], textarea { display: block; width: 100%; padding: .55rem .65rem; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 5px; }
 textarea { min-height: 5.5rem; resize: vertical; font-family: ui-monospace, monospace; font-size: .9rem; }
 button { font: inherit; cursor: pointer; padding: .5rem .9rem; border-radius: 5px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
-button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+a.button { display: inline-block; padding: .55rem 1rem; border-radius: 5px; border: 1px solid var(--line); text-decoration: none; }
+button.primary, a.button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
 button.danger { color: var(--danger); border-color: var(--danger); }
 button.link { border: 0; background: none; padding: 0; color: var(--accent); text-decoration: underline; }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }

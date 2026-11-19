@@ -8,32 +8,80 @@ import app from '../../src/worker'
 import { isAllowed, normalizeEmail } from '../../src/worker/auth/allowlist'
 import { generateToken, hashToken } from '../../src/worker/auth/tokens'
 import { decryptSiteSecret } from '../../src/worker/crypto'
-import { LOGIN_TOKEN_TTL_S, LOGIN_TOKENS_MAX, SESSION_TTL_S } from '../../src/worker/db/auth'
 import { findIngestSite } from '../../src/worker/db/scoped'
 import { siteIdentity } from '../../src/worker/identity'
 
 import { BASE, call, newSite, now, open, owner, OWNER, secretIn } from './helpers'
 
-let mail: string[]
+const CLIENT = 'test-client.apps.googleusercontent.com' // vitest.config.ts
+const CALLBACK = '/login/google/callback'
+
 beforeEach(async () => {
-  mail = []
-  vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
-    mail.push(args.join(' '))
-  })
   // Sign-in state is global, not per account, so each test starts without any.
   await env.DB.batch([
-    env.DB.prepare('DELETE FROM login_tokens'),
     env.DB.prepare('DELETE FROM sessions'),
-    env.DB.prepare('DELETE FROM users WHERE email = ?').bind(OWNER),
+    env.DB.prepare('DELETE FROM users WHERE email IN (?, ?)').bind(OWNER, 'moved@allowed.example'),
   ])
 })
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
 
-const linkToken = () => /\/login\/confirm\?token=([A-Za-z0-9_-]{43})/.exec(mail.join('\n'))?.[1]
 const count = async (sql: string, ...binds: unknown[]) =>
   (await env.DB.prepare(sql)
     .bind(...binds)
     .first<{ n: number }>())!.n
+
+const b64 = (value: unknown) => btoa(JSON.stringify(value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+const idToken = (claims: Record<string, unknown>) => `${b64({ alg: 'RS256' })}.${b64(claims)}.signature`
+
+/** Begins a sign-in and returns what the browser would now hold and carry. */
+async function begin(base = BASE) {
+  const res = await call('/login/google', { base })
+  const cookie = res.headers.get('set-cookie')!
+  const target = new URL(res.headers.get('location')!)
+  return { res, cookie, jar: cookie.split(';')[0]!, target, state: target.searchParams.get('state')! }
+}
+
+/** Stands in for Google's token endpoint, recording what the Worker sent it. */
+function google(claims: Record<string, unknown> | null, status = 200) {
+  const requests: URLSearchParams[] = []
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    expect(String(input)).toBe('https://oauth2.googleapis.com/token')
+    requests.push(new URLSearchParams(String(init?.body)))
+    return new Response(
+      JSON.stringify(claims ? { id_token: idToken(claims), access_token: 'unused' } : { error: 'x' }),
+      {
+        status,
+      },
+    )
+  })
+  return requests
+}
+
+const person = (flow: { target: URL }, patch: Record<string, unknown> = {}) => ({
+  iss: 'https://accounts.google.com',
+  aud: CLIENT,
+  sub: '1090000000000000001',
+  email: OWNER,
+  email_verified: true,
+  // A Google Workspace account for the address's own domain.
+  hd: 'allowed.example',
+  name: 'Owner Person',
+  nonce: flow.target.searchParams.get('nonce'),
+  iat: now(),
+  exp: now() + 3600,
+  ...patch,
+})
+
+/** A whole sign-in for these claims. */
+async function signIn(patch: Record<string, unknown> = {}, base = BASE) {
+  const flow = await begin(base)
+  const requests = google(person(flow, patch))
+  const res = await call(`${CALLBACK}?state=${flow.state}&code=the-code`, { cookie: flow.jar, base })
+  return { flow, requests, res, session: res.headers.get('set-cookie')?.match(/(?:__Host-)?bz_session=[^;]+/)?.[0] }
+}
 
 describe('allowlist', () => {
   it('normalizes addresses and refuses malformed ones', () => {
@@ -56,10 +104,11 @@ describe('allowlist', () => {
   })
 })
 
-describe('magic-link sign-in', () => {
-  it('serves the form with a no-script policy and no caching', async () => {
+describe('Google sign-in', () => {
+  it('serves the sign-in page with a no-script policy and no caching', async () => {
     const res = await call('/login')
     expect(res.status).toBe(200)
+    expect(await res.text()).toContain('href="/login/google"')
     expect(res.headers.get('content-security-policy')).toContain("default-src 'none'")
     expect(res.headers.get('content-security-policy')).toContain("frame-ancestors 'none'")
     expect(res.headers.get('cache-control')).toBe('no-store')
@@ -67,98 +116,277 @@ describe('magic-link sign-in', () => {
     expect(res.headers.get('x-content-type-options')).toBe('nosniff')
     const css = await call('/dashboard.css')
     expect(css.headers.get('content-type')).toContain('text/css')
+    // The emailed-link routes are gone.
+    expect((await call('/login/confirm?token=x')).status).toBe(404)
+    expect((await call('/login', { form: { email: OWNER } })).status).toBe(404)
+  })
+
+  it('sends the browser to Google with state, nonce, and a PKCE challenge it keeps in a cookie', async () => {
+    const { res, cookie, target } = await begin()
+    expect(res.status).toBe(302)
+    expect(target.origin + target.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth')
+    const q = target.searchParams
+    expect(q.get('client_id')).toBe(CLIENT)
+    expect(q.get('redirect_uri')).toBe(`${BASE}${CALLBACK}`)
+    expect(q.get('response_type')).toBe('code')
+    expect(q.get('scope')).toBe('openid email profile')
+    expect(q.get('code_challenge_method')).toBe('S256')
+    for (const name of ['state', 'nonce', 'code_challenge']) expect(q.get(name)).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(cookie).toMatch(/^bz_oauth=[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43};/)
+    expect(cookie).toContain('HttpOnly')
+    expect(cookie).toContain('SameSite=Lax')
+    expect(cookie).toContain('Max-Age=600')
+    // The verifier stays in the cookie; only its hash goes to Google.
+    const verifier = cookie.split(';')[0]!.split('.')[2]!
+    expect(target.href).not.toContain(verifier)
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))
+    const challenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '')
+    expect(q.get('code_challenge')).toBe(challenge)
+    // Two starts never share values.
+    expect((await begin()).state).not.toBe(q.get('state'))
+  })
+
+  it('signs in, creating the user and one account, and stores only the session hash', async () => {
+    const { flow, requests, res, session } = await signIn()
+    expect(res.status).toBe(303)
+    expect(res.headers.get('location')).toBe('/sites')
+    const cookies = res.headers.get('set-cookie')!
+    expect(cookies).toMatch(/bz_session=[A-Za-z0-9_-]{43};/)
+    expect(cookies).toContain('HttpOnly')
+    expect(cookies).toContain('SameSite=Lax')
+    expect(cookies).toMatch(/bz_oauth=;/)
+
+    // What went to Google: the code, the secret, and the verifier from the cookie.
+    expect(requests).toHaveLength(1)
+    const sent = requests[0]!
+    expect(sent.get('grant_type')).toBe('authorization_code')
+    expect(sent.get('code')).toBe('the-code')
+    expect(sent.get('client_id')).toBe(CLIENT)
+    expect(sent.get('client_secret')).toBe('test-client-secret')
+    expect(sent.get('redirect_uri')).toBe(`${BASE}${CALLBACK}`)
+    expect(sent.get('code_verifier')).toBe(flow.jar.split('.')[2])
+
+    const user = await env.DB.prepare('SELECT id, name, google_sub FROM users WHERE email = ?').bind(OWNER).first()
+    expect(user).toMatchObject({ name: 'Owner Person', google_sub: '1090000000000000001' })
+    expect(await count('SELECT count(*) AS n FROM memberships WHERE user_id = ?', user!.id)).toBe(1)
+    const row = await env.DB.prepare('SELECT token_hash FROM sessions').first<{ token_hash: string }>()
+    expect(row!.token_hash).toBe(await hashToken(session!.split('=')[1]!))
+
+    const sites = await call('/sites', { cookie: session })
+    expect(sites.status).toBe(200)
+    expect(await sites.text()).toContain(OWNER)
+    expect((await call('/login', { cookie: session })).headers.get('location')).toBe('/sites')
+
+    // Signing in again is the same user and the same account.
+    const accounts = await count('SELECT count(*) AS n FROM accounts')
+    expect((await signIn()).res.status).toBe(303)
+    expect(await count('SELECT count(*) AS n FROM users WHERE email = ?', OWNER)).toBe(1)
+    expect(await count('SELECT count(*) AS n FROM accounts')).toBe(accounts)
+    expect(await count('SELECT count(*) AS n FROM sessions')).toBe(2)
+  })
+
+  it('uses __Host- Secure cookies over HTTPS', async () => {
+    const base = 'https://bugzap.test'
+    const flow = await begin(base)
+    expect(flow.cookie).toMatch(/^__Host-bz_oauth=/)
+    expect(flow.cookie).toContain('Secure')
+    expect(flow.target.searchParams.get('redirect_uri')).toBe(`${base}${CALLBACK}`)
+    google(person(flow))
+    const res = await call(`${CALLBACK}?state=${flow.state}&code=c`, { cookie: flow.jar, base })
+    const session = res.headers.get('set-cookie')!.match(/__Host-bz_session=[^;]+/)![0]
+    expect(res.headers.get('set-cookie')).toContain('Secure')
+    expect((await call('/sites', { cookie: session, base })).status).toBe(200)
+  })
+
+  it('finishes only the sign-in this browser started', async () => {
+    const mine = await begin()
+    const other = await begin()
+    const requests = google(person(mine))
+    const attempts = [
+      call(`${CALLBACK}?state=${other.state}&code=c`, { cookie: mine.jar }), // someone else's state
+      call(`${CALLBACK}?state=${mine.state}&code=c`), // no cookie
+      call(`${CALLBACK}?state=${mine.state}&code=c`, { cookie: 'bz_oauth=garbage' }),
+      call(`${CALLBACK}?code=c`, { cookie: mine.jar }), // no state
+      call(`${CALLBACK}?state=${mine.state}`, { cookie: mine.jar }), // no code
+      call(`${CALLBACK}?state=${mine.state}&code=${'c'.repeat(3000)}`, { cookie: mine.jar }),
+      call(`${CALLBACK}?state=${mine.state}&error=access_denied`, { cookie: mine.jar }),
+      call(`${CALLBACK}?state=${other.state}&error=access_denied`, { cookie: mine.jar }),
+    ]
+    for (const attempt of attempts) {
+      const res = await attempt
+      expect(res.status).toBe(400)
+      expect(res.headers.get('set-cookie') ?? '').not.toContain('bz_session')
+    }
+    expect(requests).toHaveLength(0)
+    expect(await count('SELECT count(*) AS n FROM sessions')).toBe(0)
+  })
+
+  it('leaves a sign-in under way alone when a stray callback arrives with the wrong state', async () => {
+    const mine = await begin()
+    // A link someone else made the browser open: no state of ours, so nothing is spent.
+    const stray = await call(`${CALLBACK}?error=access_denied&state=${generateToken()}`, { cookie: mine.jar })
+    expect(stray.status).toBe(400)
+    expect(stray.headers.get('set-cookie')).toBeNull()
+    google(person(mine))
+    expect((await call(`${CALLBACK}?state=${mine.state}&code=c`, { cookie: mine.jar })).status).toBe(303)
+  })
+
+  it('trusts an address only when Google is the authority for it', async () => {
+    // An outside address on a personal Google account: verified once, perhaps long ago.
+    for (const patch of [{ hd: undefined }, { hd: 'other.example' }, { hd: 'gmail.com' }, { hd: 7 }]) {
+      const { res } = await signIn(patch)
+      expect(res.status).toBe(400)
+      expect(res.headers.get('set-cookie') ?? '').not.toContain('bz_session')
+    }
+    expect(await count('SELECT count(*) AS n FROM users WHERE email = ?', OWNER)).toBe(0)
+
+    // Gmail needs no hosted domain, and a Workspace domain is matched without regard to case.
+    const flow = await begin()
+    google(person(flow, { email: 'someone@gmail.com', hd: undefined, sub: '77' }))
+    const gmail = await call(`${CALLBACK}?state=${flow.state}&code=c`, {
+      cookie: flow.jar,
+      env: { SIGNUP_ALLOWLIST: 'someone@gmail.com' },
+    })
+    expect(gmail.status).toBe(303)
+    await env.DB.prepare('DELETE FROM users WHERE email = ?').bind('someone@gmail.com').run()
+    expect((await signIn({ hd: 'Allowed.Example' })).res.status).toBe(303)
+  })
+
+  it('refuses a token that is not a verified Google sign-in for this app and this attempt', async () => {
+    const bad: Record<string, unknown>[] = [
+      { aud: 'another-app.apps.googleusercontent.com' },
+      { iss: 'https://accounts.evil.example' },
+      { exp: now() - 1 },
+      { nonce: 'a-different-nonce' },
+      { nonce: undefined },
+      { email_verified: false },
+      { email_verified: undefined },
+      { email: 'not an address' },
+      { email: undefined },
+      { sub: undefined },
+      { sub: 12345 },
+    ]
+    for (const patch of bad) {
+      const { res } = await signIn(patch)
+      expect(res.status).toBe(400)
+      expect(res.headers.get('set-cookie') ?? '').not.toContain('bz_session')
+    }
+    // Google answering with an error, or not at all, is the same refusal.
+    for (const stub of [
+      () => google(null, 400),
+      () => vi.stubGlobal('fetch', async () => Promise.reject(new Error('down'))),
+    ]) {
+      const flow = await begin()
+      stub()
+      expect((await call(`${CALLBACK}?state=${flow.state}&code=c`, { cookie: flow.jar })).status).toBe(400)
+    }
+    expect(await count('SELECT count(*) AS n FROM sessions')).toBe(0)
+    expect(await count('SELECT count(*) AS n FROM users WHERE email = ?', OWNER)).toBe(0)
+  })
+
+  it('turns away a Google account that is not on the allowlist, and stores nothing', async () => {
+    const { res } = await signIn({ email: 'stranger@elsewhere.example', hd: 'elsewhere.example', sub: '2' })
+    expect(res.status).toBe(403)
+    expect(await res.text()).toContain('cannot sign in to Bugzap')
+    expect(res.headers.get('set-cookie') ?? '').not.toContain('bz_session')
+    expect(await count('SELECT count(*) AS n FROM users WHERE email = ?', 'stranger@elsewhere.example')).toBe(0)
+  })
+
+  it('knows a person by their Google id, not their address', async () => {
+    const first = await signIn()
+    const userId = (await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(OWNER).first<{ id: number }>())!
+      .id
+
+    // A different Google identity presenting the same address gets nothing.
+    const imposter = await signIn({ sub: '999' })
+    expect(imposter.res.status).toBe(403)
+    expect(imposter.res.headers.get('set-cookie') ?? '').not.toContain('bz_session')
+    expect(await count('SELECT count(*) AS n FROM sessions')).toBe(1)
+
+    // The same identity with a new address keeps its account, and the address follows.
+    expect((await call('/sites', { cookie: first.session })).status).toBe(200)
+    const moved = await signIn({ email: 'moved@allowed.example' }, BASE)
+    expect(moved.res.status).toBe(403) // not on the allowlist under the new address
+    // ...and the sessions opened under the old address end with that refusal.
+    expect((await call('/sites', { cookie: first.session })).status).toBe(303)
+    expect(await count('SELECT count(*) AS n FROM sessions')).toBe(0)
+    const allowed = { SIGNUP_ALLOWLIST: 'moved@allowed.example' }
+    const flow = await begin()
+    google(person(flow, { email: 'moved@allowed.example' }))
+    const res = await call(`${CALLBACK}?state=${flow.state}&code=c`, { cookie: flow.jar, env: allowed })
+    expect(res.status).toBe(303)
+    expect(await env.DB.prepare('SELECT email FROM users WHERE id = ?').bind(userId).first()).toEqual({
+      email: 'moved@allowed.example',
+    })
+    expect(await count('SELECT count(*) AS n FROM memberships WHERE user_id = ?', userId)).toBe(1)
+  })
+
+  it('ties an existing user who has never signed in with Google to the identity that arrives', async () => {
+    const seeded = await owner(OWNER)
+    const { res } = await signIn()
+    expect(res.status).toBe(303)
+    expect(await env.DB.prepare('SELECT id, google_sub FROM users WHERE email = ?').bind(OWNER).first()).toEqual({
+      id: seeded.userId,
+      google_sub: '1090000000000000001',
+    })
+    expect(await count('SELECT count(*) AS n FROM memberships WHERE user_id = ?', seeded.userId)).toBe(1)
+  })
+
+  it('creates one account when the same person signs in twice at once', async () => {
+    const flows = [await begin(), await begin()]
+    // One stub answers both exchanges; each attempt keeps its own nonce.
+    vi.stubGlobal('fetch', async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const verifier = new URLSearchParams(String(init?.body)).get('code_verifier')
+      const flow = flows.find((f) => f.jar.endsWith(verifier!))!
+      return new Response(JSON.stringify({ id_token: idToken(person(flow)) }))
+    })
+    const before = await count('SELECT count(*) AS n FROM accounts')
+    const results = await Promise.all(
+      flows.map((flow) => call(`${CALLBACK}?state=${flow.state}&code=c`, { cookie: flow.jar })),
+    )
+    expect(results.map((r) => r.status)).toEqual([303, 303])
+    expect(await count('SELECT count(*) AS n FROM users WHERE email = ?', OWNER)).toBe(1)
+    expect(await count('SELECT count(*) AS n FROM accounts')).toBe(before + 1)
+  })
+
+  it('says so when Google sign-in is not configured', async () => {
+    const res = await call('/login/google', { env: { GOOGLE_CLIENT_ID: '' } })
+    expect(res.status).toBe(503)
+    expect(res.headers.get('location')).toBeNull()
   })
 
   it('refuses posts from another origin or with no origin', async () => {
-    for (const origin of ['https://evil.example', null]) {
-      const res = await call('/login', { form: { email: OWNER }, origin })
-      expect(res.status).toBe(403)
-    }
-    expect(mail).toHaveLength(0)
-    expect(await count('SELECT count(*) AS n FROM login_tokens')).toBe(0)
+    const me = await owner()
+    for (const origin of ['https://evil.example', null])
+      expect((await call('/logout', { method: 'POST', cookie: me.cookie, origin })).status).toBe(403)
+    expect((await call('/sites', { cookie: me.cookie })).status).toBe(200)
   })
 
   it('accepts a browser post whose origin is withheld, but only when the browser calls it same-origin', async () => {
     const post = (headers: Record<string, string>) =>
       app.fetch(
-        new Request(`${BASE}/login`, {
+        new Request(`${BASE}/logout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...headers },
-          body: `email=${encodeURIComponent(OWNER)}`,
+          body: '',
         }),
-        { ...env, LOGIN_BURST: open },
+        env,
         createExecutionContext(),
       )
-    expect((await post({ Origin: 'null', 'Sec-Fetch-Site': 'same-origin' })).status).toBe(200)
-    expect((await post({ 'Sec-Fetch-Site': 'same-origin' })).status).toBe(200)
+    expect((await post({ Origin: 'null', 'Sec-Fetch-Site': 'same-origin' })).status).toBe(303)
+    expect((await post({ 'Sec-Fetch-Site': 'same-origin' })).status).toBe(303)
     for (const site of ['cross-site', 'same-site', 'none'])
       expect((await post({ Origin: 'null', 'Sec-Fetch-Site': site })).status).toBe(403)
     expect((await post({ Origin: 'https://evil.example', 'Sec-Fetch-Site': 'same-origin' })).status).toBe(403)
     expect((await post({ Origin: 'null' })).status).toBe(403)
   })
 
-  it('rejects a malformed address', async () => {
-    const res = await call('/login', { form: { email: 'not an address' } })
-    expect(res.status).toBe(400)
-    expect(await res.text()).toContain('Enter a valid email address.')
-  })
-
-  it('answers an address off the allowlist exactly like one on it, and stores nothing', async () => {
-    const refused = await call('/login', { form: { email: 'stranger@elsewhere.example' } })
-    const allowed = await call('/login', { form: { email: OWNER } })
-    expect(refused.status).toBe(200)
-    expect(await refused.text()).toBe(await allowed.text())
-    expect(await count('SELECT count(*) AS n FROM users WHERE email = ?', 'stranger@elsewhere.example')).toBe(0)
-    expect(mail).toHaveLength(1)
-    expect(mail[0]).toContain(`To: ${OWNER}`)
-  })
-
-  const memberships = () =>
-    count('SELECT count(*) AS n FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.email = ?', OWNER)
-
-  it('stores only the token hash, and creates no account until a link is used', async () => {
-    await call('/login', { form: { email: ` ${OWNER.toUpperCase()} ` } })
-    const first = linkToken()!
-    mail.length = 0
-    await call('/login', { form: { email: OWNER } })
-    const second = linkToken()!
-    expect(await count('SELECT count(*) AS n FROM users WHERE email = ?', OWNER)).toBe(1)
-    expect(await memberships()).toBe(0)
-    const stored = await env.DB.prepare('SELECT token_hash, expires_at FROM login_tokens').all<{
-      token_hash: string
-      expires_at: number
-    }>()
-    expect(stored.results).toHaveLength(2)
-    expect(stored.results.map((r) => r.token_hash)).toContain(await hashToken(first))
-    expect(JSON.stringify(stored.results)).not.toContain(first)
-    expect(stored.results[0]!.expires_at).toBeLessThanOrEqual(now() + LOGIN_TOKEN_TTL_S)
-
-    // Two links used at the same moment still make exactly one account.
-    const accountsBefore = await count('SELECT count(*) AS n FROM accounts')
-    const both = await Promise.all([first, second].map((token) => call('/login/confirm', { form: { token } })))
-    expect(both.map((r) => r.status)).toEqual([303, 303])
-    expect(await memberships()).toBe(1)
-    expect(await count('SELECT count(*) AS n FROM accounts')).toBe(accountsBefore + 1)
-    expect(await count('SELECT count(*) AS n FROM sessions')).toBe(2)
-  })
-
-  it('answers a storage failure like any other request', async () => {
-    const broken = { ...env.DB, batch: async () => Promise.reject(new Error('D1 is down')) } as unknown as D1Database
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-    const res = await call('/login', { form: { email: OWNER }, env: { DB: broken } })
-    expect(res.status).toBe(200)
-    expect(await res.text()).toBe(
-      await (await call('/login', { form: { email: 'stranger@elsewhere.example' } })).text(),
-    )
-  })
-
-  it('ends sessions and unused links when an address leaves the allowlist', async () => {
-    await call('/login', { form: { email: OWNER } })
-    const token = linkToken()!
-    const closed = { SIGNUP_ALLOWLIST: '@team.example' }
-    const res = await call('/login/confirm', { form: { token }, env: closed })
-    const session = res.headers.get('set-cookie')?.split(';')[0]
-    expect((await call('/sites', { cookie: session, env: closed })).status).toBe(303)
+  it('ends sessions when an address leaves the allowlist', async () => {
+    const { session } = await signIn()
+    expect((await call('/sites', { cookie: session, env: { SIGNUP_ALLOWLIST: '@team.example' } })).status).toBe(303)
     expect((await call('/sites', { cookie: session, env: { SIGNUP_ALLOWLIST: '' } })).status).toBe(303)
     expect((await call('/sites', { cookie: session })).status).toBe(200)
   })
@@ -173,79 +401,6 @@ describe('magic-link sign-in', () => {
     expect(await count('SELECT count(*) AS n FROM sites WHERE account_id = ?', me.accountId)).toBe(0)
   })
 
-  it('shows a button on GET without spending the link, then signs in once on POST', async () => {
-    await call('/login', { form: { email: OWNER } })
-    const token = linkToken()!
-    for (let i = 0; i < 3; i++) {
-      const page = await call(`/login/confirm?token=${token}`)
-      expect(page.status).toBe(200)
-      expect(await page.text()).toContain('action="/login/confirm"')
-    }
-    const res = await call('/login/confirm', { form: { token } })
-    expect(res.status).toBe(303)
-    expect(res.headers.get('location')).toBe('/sites')
-    const cookie = res.headers.get('set-cookie')!
-    expect(cookie).toMatch(/^bz_session=[A-Za-z0-9_-]{43};/)
-    expect(cookie).toContain('HttpOnly')
-    expect(cookie).toContain('SameSite=Lax')
-    expect(cookie).toContain('Path=/')
-    const session = cookie.split(';')[0]!
-    // Only the hash of the session token is stored.
-    const row = await env.DB.prepare('SELECT token_hash FROM sessions').first<{ token_hash: string }>()
-    expect(row!.token_hash).toBe(await hashToken(session.split('=')[1]!))
-
-    const sites = await call('/sites', { cookie: session })
-    expect(sites.status).toBe(200)
-    expect(await sites.text()).toContain(OWNER)
-
-    const again = await call('/login/confirm', { form: { token } })
-    expect(again.status).toBe(400)
-    expect(again.headers.get('set-cookie')).toBeNull()
-    expect((await call(`/login/confirm?token=${token}`)).status).toBe(400)
-    expect(await count('SELECT count(*) AS n FROM sessions')).toBe(1)
-  })
-
-  it('uses a __Host- Secure cookie over HTTPS', async () => {
-    const base = 'https://bugzap.test'
-    await call('/login', { form: { email: OWNER }, base })
-    expect(mail.join('\n')).toContain('https://bugzap.test/login/confirm?token=')
-    const res = await call('/login/confirm', { form: { token: linkToken()! }, base })
-    const cookie = res.headers.get('set-cookie')!
-    expect(cookie).toMatch(/^__Host-bz_session=/)
-    expect(cookie).toContain('Secure')
-    expect((await call('/sites', { cookie: cookie.split(';')[0], base })).status).toBe(200)
-  })
-
-  it('refuses expired, unknown, and malformed tokens', async () => {
-    await call('/login', { form: { email: OWNER } })
-    const token = linkToken()!
-    await env.DB.prepare('UPDATE login_tokens SET expires_at = ?')
-      .bind(now() - 1)
-      .run()
-    for (const bad of [token, generateToken(), 'short', '']) {
-      expect((await call(`/login/confirm?token=${bad}`)).status).toBe(400)
-      const res = await call('/login/confirm', { form: { token: bad } })
-      expect(res.status).toBe(400)
-      expect(res.headers.get('set-cookie')).toBeNull()
-    }
-    expect(await count('SELECT count(*) AS n FROM sessions')).toBe(0)
-  })
-
-  it('honours the burst limit and caps live links per address', async () => {
-    const limited = await call('/login', {
-      form: { email: OWNER },
-      env: { LOGIN_BURST: { limit: async () => ({ success: false }) } },
-    })
-    expect(limited.status).toBe(429)
-    expect(limited.headers.get('retry-after')).toBe('60')
-    expect(mail).toHaveLength(0)
-
-    for (let i = 0; i < LOGIN_TOKENS_MAX + 2; i++)
-      expect((await call('/login', { form: { email: OWNER } })).status).toBe(200)
-    expect(mail).toHaveLength(LOGIN_TOKENS_MAX)
-    expect(await count('SELECT count(*) AS n FROM login_tokens')).toBe(LOGIN_TOKENS_MAX)
-  })
-
   it('redirects without a live session, and sign-out ends it on the server', async () => {
     const me = await owner()
     for (const path of ['/', '/sites', '/sites/bz_pk_0000000000000000000000']) {
@@ -255,7 +410,6 @@ describe('magic-link sign-in', () => {
     }
     expect((await call('/sites', { cookie: `bz_session=${generateToken()}` })).status).toBe(303)
     expect((await call('/sites', { cookie: me.cookie })).status).toBe(200)
-    expect((await call('/login', { cookie: me.cookie })).headers.get('location')).toBe('/sites')
 
     const out = await call('/logout', { method: 'POST', cookie: me.cookie })
     expect(out.status).toBe(303)
