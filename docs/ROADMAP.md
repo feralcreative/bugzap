@@ -12,7 +12,7 @@ Decided 2026-10-18. The full build plan, with the schema, the APIs, and eight mi
 
 - **An embeddable, framework-free script** that drops the pin, takes the screenshot, and posts the report to the hosted backend. It runs in a shadow DOM so it cannot clash with any host's CSS.
 - **A hosted backend on Cloudflare Workers**: D1 for data, R2 for screenshots, the widget served as a static asset, and an owner dashboard rendered by the same Worker. v1 ships the widget and the backend together.
-- **Reporters are identified by the host site**, which signs an HS256 token over the user's id, email, and name with a per-site secret. Sites with no login of their own cannot use v1.
+- **Reporters are guests by default** (changed 2026-11-18): a site needs only the embed snippet, and each browser gets a random id that shows a guest their own pins. A site with its own sign-in can instead require signed identity, where its server signs an HS256 token over the user's id, email, and name with a per-site secret.
 - **Screenshots are automatic DOM capture** (modern-screenshot), cropped around the pin, with a file upload when the capture comes out blank.
 - **Routeloop moves to the hosted backend** like any other site, rather than keeping its own `/feedback` intake.
 - **Report kinds are bug, idea, and question**, as in Routeloop.
@@ -40,6 +40,5 @@ Rejected: client-feedback vocabulary (redline, markup, punchlist, and so on) and
 - Email sending domain: mail stays in console mode until SPF and DKIM records exist for a sending domain, which is a DNS change.
 - Screenshot retention: proposed as an R2 lifecycle rule at 180 days.
 - Query strings: proposed as stripped by default, with a per-site list of parameters to keep.
-- Sites with no login of their own: proposed as reviewer invites over a magic link, after v1.
 
 Settled 2026-10-18: hosting (Cloudflare Workers), screenshots (DOM capture with upload fallback), reporters (host-identified), and who sees pins (the reporter sees their own, the owner sees all of them through the dashboard).

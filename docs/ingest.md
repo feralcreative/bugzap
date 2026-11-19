@@ -71,7 +71,7 @@ Send `POST /v1/reports?site=bz_pk_…` as browser-generated `multipart/form-data
 | `screenshot`  | One PNG or JPEG file when `screenshot.mode` is `auto` or `upload`; absent when the mode is `none` |
 | `attachments` | Zero to two additional PNG or JPEG file fields                                                    |
 
-The JSON fields are `v`, `site`, `identity`, `kind`, `body`, `page`, `pin`, `screenshot`, and optional `diagnostics`; the parser is in `src/core/payload.ts`. `pin: null` submits a page-level report. `screenshot: { "mode": "none", "failed": "capture timed out" }` records capture failure without blocking a text report. Every file is capped at 2 MiB and 40 million pixels. The whole request is capped at three file limits plus the JSON limit and 16 KiB for multipart overhead, even when Content-Length is absent.
+The JSON fields are `v`, `site`, who is reporting, `kind`, `body`, `page`, `pin`, `screenshot`, and optional `diagnostics`; the parser is in `src/core/payload.ts`. Who is reporting is either `identity`, a host-signed token, or `guest`, a 43-character base64url id the widget generated, with an optional `reporter: { name, email }` that nothing verifies. A guest is accepted only on a site open to guests, and is stored under a hash of the id. A signed token is accepted on every site, and beside one `guest` and `reporter` are ignored. `pin: null` submits a page-level report. `screenshot: { "mode": "none", "failed": "capture timed out" }` records capture failure without blocking a text report. Every file is capped at 2 MiB and 40 million pixels. The whole request is capped at three file limits plus the JSON limit and 16 KiB for multipart overhead, even when Content-Length is absent.
 
 The submitting Origin must be allowlisted and must match `page.url`'s origin. Credentials, query strings, and fragments are dropped from stored page URLs; `page_key` also normalizes trailing slashes. Diagnostics are redacted before storage. Client MIME types, filenames, account IDs, and reporter fields are never trusted. Images are sniffed and structurally checked, metadata is stripped, and the server generates each private R2 key. Uploaded images are not publicly served by this milestone.
 
@@ -82,12 +82,12 @@ Failures return `{"ok":false,"error":"<code>","message":"<human-readable-detail>
 | HTTP | Error codes                                                                                                                                            |
 | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 400  | `invalid_multipart`, `invalid_payload`, `invalid_site_key`, `invalid_page`, `invalid_parts`, `too_many_images`, `screenshot_mismatch`, `invalid_image` |
-| 401  | `invalid_identity`                                                                                                                                     |
+| 401  | `invalid_identity`, `identity_required` (a guest on a site that requires signed identity)                                                              |
 | 403  | `origin_forbidden`, `site_disabled`                                                                                                                    |
 | 404  | `site_not_found`                                                                                                                                       |
 | 413  | `request_too_large`, `payload_too_large`, `image_too_large`                                                                                            |
 | 415  | `unsupported_media_type`, `invalid_image`                                                                                                              |
-| 429  | `burst_limited` (Retry-After: 10), `hourly_limited` (Retry-After: 3600)                                                                                |
+| 429  | `burst_limited` (Retry-After: 10), `hourly_limited` (Retry-After: 3600), `site_limited` (all guests on the site, Retry-After: 3600)                    |
 | 503  | `storage_unavailable`, `service_unavailable`                                                                                                           |
 
 Limits are per signed reporter subject and site: five attempts per ten seconds through the Workers binding, plus ten accepted reports per rolling hour in D1. A database trigger repeats the hourly check inside the atomic batch, so concurrent requests cannot bypass it. The edge burst counter is an approximate, per-location guard; the D1 check enforces the hourly count. See [Cloudflare's rate limit semantics](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/).

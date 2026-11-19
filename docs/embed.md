@@ -10,15 +10,13 @@ npm run setup:local
 npm start
 ```
 
-Open <http://localhost:2834/>. Click Feedback, then a host element such as Save changes. Pin selection consumes that click so the host action does not also run. Write a report and send it. The confirmation means the local Worker accepted the report into D1. Use Report this page to send a report without an element. Escape or Cancel closes the flow and restores host-page interaction. The ignored-area button continues to work during selection.
+Open <http://localhost:2834/> for a host that signs identities, or <http://localhost:2834/guest.html> for one with only the embed. Click Feedback, then a host element such as Save changes. Pin selection consumes that click so the host action does not also run. Write a report and send it. The confirmation means the local Worker accepted the report into D1. Use Report this page to send a report without an element. Escape or Cancel closes the flow and restores host-page interaction. The ignored-area button continues to work during selection.
 
 The Node demo server reads the private seed file and signs a one-hour token for `demo-reviewer` on each HTML request. It serves only the demo folder on localhost and rejects unrelated Host headers. Only the public site key and signed token reach the page; the signing secret and encryption key stay server-side. The HTML is served with `Cache-Control: no-store`.
 
 ## Add the embed to a host
 
-Create a site in [the dashboard](dashboard.md) and allow the host's exact origin there. Locally, the seed utility has already made one. The host's server must sign an HS256 identity token with its site's secret, covering `sub`, optional `email` and `name`, `iat`, and `exp`. Use a lifetime of 24 hours or less; the server caps it at seven days. The [identity helper and intake contract](ingest.md) describe the local signing flow.
-
-Render this snippet with the site's public key, a token signed for the signed-in user, and the address of the Bugzap Worker:
+Create a site in [the dashboard](dashboard.md) and allow the host's exact origin there. The site page shows the snippet ready to paste, with the site's public key and the Worker's address filled in:
 
 ```html
 <script>
@@ -27,13 +25,32 @@ Render this snippet with the site's public key, a token signed for the signed-in
     function () {
       ;(window.Bugzap.q = window.Bugzap.q || []).push(arguments)
     }
-  Bugzap('init', {
-    site: 'YOUR_PUBLIC_SITE_KEY',
-    identity: 'SERVER_SIGNED_IDENTITY_TOKEN',
-  })
+  Bugzap('init', { site: 'YOUR_PUBLIC_SITE_KEY' })
 </script>
 <script async src="https://YOUR_WORKER/v1/bugzap.js"></script>
 ```
+
+That is the whole setup for a site open to guests, which is what a new site is unless its owner chooses otherwise. Nothing runs on the host's server.
+
+### Guests
+
+With no `identity` in the init options, every visitor reports as a guest. The widget makes one random id per browser per site and keeps it in that browser's `localStorage` under `bugzap:<site key>`, along with the name and email the guest last typed. The id is what shows a guest their own pins when they return, and only theirs; clearing site data or using another browser starts over. The composer offers optional name and email fields. Nothing verifies them, and the dashboard labels every guest report as such.
+
+Guests are held back by the site's origin allowlist, by limits per guest id and per IP address, and by a ceiling of 100 guest reports per site per hour, enforced in the database. There is no CAPTCHA.
+
+### Signed identity
+
+A site with its own sign-in can require it instead. In the dashboard, choose Only people signed in to your site when creating the site, or Require signed identity later; either shows the site's signing secret once. The host's server signs an HS256 identity token with that secret, covering `sub`, optional `email` and `name`, `iat`, and `exp`, and passes it in:
+
+```js
+Bugzap('init', {
+  site: 'YOUR_PUBLIC_SITE_KEY',
+  // A token signed for the signed-in user, or null when nobody is signed in.
+  identity: SERVER_SIGNED_IDENTITY_TOKEN,
+})
+```
+
+Including the `identity` key, even as `null`, tells the widget to stay hidden until it has a token; `Bugzap('identify', token)` supplies one later. Use a lifetime of 24 hours or less; the server caps it at seven days. The [identity helper and intake contract](ingest.md) describe the local signing flow. A signed token is also accepted on a site open to guests, so a host can identify its signed-in users and still take reports from everyone else.
 
 Serialize template values as JSON and escape `<` as `\u003c` before placing them inside a script. Never put a `bz_sk_…` signing secret into a browser. The widget rejects a secret used as the site key. Its API origin defaults to the origin of its script; `api` in the init options can override it with an HTTPS origin or HTTP on localhost.
 
@@ -47,18 +64,18 @@ When a site's owner presses Open on page in the dashboard, the page opens with `
 
 The queue works before or after the async script loads. Calls return without throwing into the host page. Register events before `init` if you need the initial `ready` event.
 
-| Command                                             | Behavior                                                                                                       |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `Bugzap('init', { site, identity, api? })`          | Creates the widget; repeated init replaces the previous instance's UI and clears its state                     |
-| `Bugzap('identify', token)`                         | Supplies or refreshes an identity; clears the previous draft, context, and diagnostic buffer                   |
-| `Bugzap('logout')`                                  | Aborts pending client work, clears identity and reporter state, and hides the launcher                         |
-| `Bugzap('open')`                                    | Enters element-selection mode when identified                                                                  |
-| `Bugzap('open', { page: true })`                    | Opens a page-level report directly, including for keyboard users                                               |
-| `Bugzap('close')`                                   | Cancels selection/composition and clears the draft                                                             |
-| `Bugzap('context', { build: 'v1', feature: true })` | Replaces the host's optional flat diagnostics context; secret/location keys and URL query strings are redacted |
-| `Bugzap('on', event, callback)`                     | Listens for `ready`, `open`, `close`, `submitted`, or `error`                                                  |
-| `Bugzap('refresh')`                                 | Reloads saved pins for the current identity and page                                                           |
-| `Bugzap('destroy')`                                 | Removes the widget and its listeners and restores recorder hooks where it still owns them                      |
+| Command                                             | Behavior                                                                                                                          |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `Bugzap('init', { site, identity?, api? })`         | Creates the widget; repeated init replaces the previous instance's UI and clears its state                                        |
+| `Bugzap('identify', token)`                         | Supplies or refreshes an identity; clears the previous draft, context, and diagnostic buffer                                      |
+| `Bugzap('logout')`                                  | Aborts pending client work and clears the identity; the visitor becomes a guest, or on a signed-identity embed the launcher hides |
+| `Bugzap('open')`                                    | Enters element-selection mode when identified                                                                                     |
+| `Bugzap('open', { page: true })`                    | Opens a page-level report directly, including for keyboard users                                                                  |
+| `Bugzap('close')`                                   | Cancels selection/composition and clears the draft                                                                                |
+| `Bugzap('context', { build: 'v1', feature: true })` | Replaces the host's optional flat diagnostics context; secret/location keys and URL query strings are redacted                    |
+| `Bugzap('on', event, callback)`                     | Listens for `ready`, `open`, `close`, `submitted`, or `error`                                                                     |
+| `Bugzap('refresh')`                                 | Reloads saved pins for the current identity and page                                                                              |
+| `Bugzap('destroy')`                                 | Removes the widget and its listeners and restores recorder hooks where it still owns them                                         |
 
 `submitted` receives `{ id }`, the report's public ID. `error` receives `{ code }`; raw exceptions, report text, and tokens are not sent to event callbacks. Callback exceptions and rejected promises are contained individually. `logout` or `identify` closes an open report; a late response from the previous identity cannot replace the current UI.
 
