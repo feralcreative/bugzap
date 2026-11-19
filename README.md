@@ -24,15 +24,16 @@ npm start
 
 The demo server signs a fresh one-hour identity token for its demo reviewer whenever the page is loaded. The signing secret stays in the local server process. See [the embed guide](docs/embed.md) for the widget commands and host-site setup.
 
-| Command                                                                          | What it does                                                                       |
-| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `npm test`                                                                       | Vitest: `core` in Node, `widget` in happy-dom, `worker` inside the Workers runtime |
-| `npm run typecheck`                                                              | `tsc` against each area's own tsconfig, plus the tests                             |
-| `npm run types`                                                                  | Regenerates `worker-configuration.d.ts` after a change to `wrangler.jsonc`         |
-| `npm run build:widget`                                                           | Builds `dist/assets/v1/bugzap.js` on its own                                       |
-| `npm run setup:local`                                                            | Applies migrations and seeds a site in local Wrangler storage                      |
-| `npm run identity:local -- --sub reviewer --output /private/tmp/bugzap-identity` | Writes a signed identity token to a new private file                               |
-| `npm run login:local`                                                            | Prints a one-time dashboard sign-in link for the seeded owner                      |
+| Command                                                                          | What it does                                                                            |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `npm test`                                                                       | Vitest: `core` in Node, `widget` in happy-dom, `worker` inside the Workers runtime      |
+| `npm run typecheck`                                                              | `tsc` against each area's own tsconfig, plus the tests                                  |
+| `npm run types`                                                                  | Regenerates `worker-configuration.d.ts` after a change to `wrangler.jsonc`              |
+| `npm run build:widget`                                                           | Builds `dist/assets/v1/bugzap.js` on its own                                            |
+| `npm run setup:local`                                                            | Applies migrations and seeds a site in local Wrangler storage                           |
+| `npm run identity:local -- --sub reviewer --output /private/tmp/bugzap-identity` | Writes a signed identity token to a new private file                                    |
+| `npm run login:local`                                                            | Prints a one-time dashboard sign-in link for the seeded owner                           |
+| `./utils/deploy/stage.sh` and `./utils/deploy/prod.sh`                           | Check, build, and deploy to staging or production; see [docs/deploy.md](docs/deploy.md) |
 
 ## Layout
 
