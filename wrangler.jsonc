@@ -114,8 +114,7 @@
         {
           "binding": "DB",
           "database_name": "bugzap-production",
-          // Replace with the id `wrangler d1 create bugzap-production` prints.
-          "database_id": "00000000-0000-0000-0000-000000000000",
+          "database_id": "ddfeedf2-c2e5-406b-9584-26f7d8fb100d",
           "migrations_dir": "migrations",
         },
       ],
