@@ -57,6 +57,9 @@
     },
   ],
 
+  // Hourly cleanup: expired sign-in links and sessions, and unclaimed screenshots.
+  "triggers": { "crons": ["17 * * * *"] },
+
   "vars": {
     // console prints mail to the terminal; cloudflare sends it (needs a sending domain).
     "MAIL_MODE": "console",

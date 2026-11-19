@@ -3,6 +3,7 @@ import dashboard from './dashboard'
 import ingest from './ingest'
 import { IngestError } from './ingest/body'
 import pins from './pins'
+import { sweep } from './sweep'
 
 const app = new Hono<{ Bindings: Env }>()
 
@@ -21,4 +22,10 @@ app.onError((error, c) => {
   return c.json({ ok: false, error: 'service_unavailable', message: 'Please try again shortly.' }, 503)
 })
 
-export default app
+// `fetch` stays a plain property so tests can call it as they would the app.
+export default {
+  fetch: app.fetch,
+  scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(sweep(env, Math.floor(Date.now() / 1000)))
+  },
+} satisfies ExportedHandler<Env>
