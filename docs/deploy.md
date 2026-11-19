@@ -71,18 +71,36 @@ export CLOUDFLARE_ACCOUNT_ID=30aa05fc7822ef63635046e5c7771a9a
 npx wrangler d1 migrations apply DB --env staging --remote
 ```
 
-### 5. Set the secrets
+### 5. Create the Google OAuth client
 
-Replace `ITEM_UUID` with the 1Password item's UUID, and the address with the one that may sign in to the dashboard. Wrangler may ask to create the Worker first; say yes.
+Owners sign in with Google, so the Worker needs an OAuth client. One client can serve every environment. In the Google Cloud console, under APIs & Services:
+
+1. Configure the OAuth consent screen if the project has none: an app name, a support address, and the `openid`, `email`, and `profile` scopes. For a consent screen in Testing, add each owner's address as a test user; publish it to let any allowlisted Google account sign in.
+2. Under Credentials, create an OAuth client ID of type Web application.
+3. Add these authorized redirect URIs, exactly:
+
+```text
+https://stage.bugzap.app/login/google/callback
+https://bugzap.app/login/google/callback
+http://localhost:2833/login/google/callback
+```
+
+Save the client ID and the client secret in one 1Password item, and note the item's UUID.
+
+### 6. Set the secrets
+
+Replace the two `ITEM_UUID`s and the field names with the 1Password items' own, and the allowlist with the addresses or `@domain`s that may sign in. Wrangler may ask to create the Worker first; say yes.
 
 ```bash
 cd /Users/ziad/www/bugzap
 export CLOUDFLARE_ACCOUNT_ID=30aa05fc7822ef63635046e5c7771a9a
-op read "op://Private/ITEM_UUID/credential" --account ziadezzat.1password.com | npx wrangler secret put SITE_KEK --env staging
-print -n "you@example.com" | npx wrangler secret put SIGNUP_ALLOWLIST --env staging
+op read "op://VAULT/ITEM_UUID/credential" --account ziadezzat.1password.com | npx wrangler secret put SITE_KEK --env staging
+print -n "@example.com" | npx wrangler secret put SIGNUP_ALLOWLIST --env staging
+op read "op://VAULT/GOOGLE_ITEM_UUID/username" --account ziadezzat.1password.com | npx wrangler secret put GOOGLE_CLIENT_ID --env staging
+op read "op://VAULT/GOOGLE_ITEM_UUID/credential" --account ziadezzat.1password.com | npx wrangler secret put GOOGLE_CLIENT_SECRET --env staging
 ```
 
-### 6. Deploy
+### 7. Deploy
 
 ```bash
 cd /Users/ziad/www/bugzap
@@ -91,20 +109,13 @@ cd /Users/ziad/www/bugzap
 
 ## First sign-in
 
-Mail is in `console` mode, so the sign-in link is written to the Worker's log. Start a tail in one terminal:
-
-```bash
-cd /Users/ziad/www/bugzap
-npx wrangler tail bugzap-staging
-```
-
-Open `/login` on the URL the deploy printed, enter the allowlisted address, and open the link the tail prints. Then create a site for Routeloop staging with its origin, and copy the signing secret it shows once.
+Open `/login` on the environment's URL and press Sign in with Google. A Google account on the allowlist lands on Sites; any other is told it cannot sign in. The account must be a Google Workspace account for its address's domain, or a Gmail account. Then create a site for the host that will embed the widget, with its origin, and copy the signing secret it shows once.
 
 ## Checks after a first deploy
 
 - `/healthz` answers `ok`. The script does not check this itself.
 - `/v1/bugzap.js` loads, with `Access-Control-Allow-Origin: *`.
-- Signing in works over HTTPS; this is the first time the `__Host-bz_session` cookie is used for real.
+- Signing in with Google works; this is the first time the `__Host-` cookies and the real Google exchange are used.
 - A report from the embedding site appears in the inbox with its screenshot, and Open on page draws its pin.
 - The hourly cron trigger shows under the Worker's Triggers in the Cloudflare dashboard, and a `sweep` event appears in the log within the hour. The trigger is declared once at the top of `wrangler.jsonc` and inherited by both environments; this is the check that it was.
 
@@ -114,7 +125,7 @@ Run the script. When a change adds a migration, the script stops and prints the 
 
 ## Known gaps on a deployed Worker
 
-- Owners get sign-in links and new-report notices only through the log, until a sending domain exists.
+- No mail is sent. A new report writes a one-line notice with its link to the Worker's log (`npx wrangler tail`), until a sending domain exists.
 - Screenshots are kept indefinitely; the proposed 180-day R2 lifecycle rule is not set.
 - Capture speed on Routeloop's real builder page has not been measured. The staging embed is where that gets answered.
 

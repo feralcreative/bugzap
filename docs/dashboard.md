@@ -10,19 +10,19 @@ npm start
 npm run login:local
 ```
 
-`setup:local` applies any new migrations, adds the seeded owner to `SIGNUP_ALLOWLIST` in `.dev.vars` when that setting is absent, and leaves an existing list alone. `login:local` prints a one-time sign-in link for that owner. Open it, press Sign in, and the seeded Local demo site is listed.
+`setup:local` applies any new migrations and adds the seeded owner to `SIGNUP_ALLOWLIST` in `.dev.vars` when that setting is absent, leaving an existing list alone. The seeded owner's address is not a real Google account, so `login:local` creates a one-day session for it directly and prints a one-line `document.cookie` command: open <http://localhost:2833/login>, paste the line into the browser console, and reload.
 
-The real flow works too: open <http://localhost:2833/login>, enter the seeded address, and take the link from the terminal running the Worker. `MAIL_MODE` is `console`, so mail is printed, not sent.
+To use real Google sign-in locally, add `http://localhost:2833/login/google/callback` to the OAuth client's redirect URIs, put the client's values in `.dev.vars` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and add your own address to `SIGNUP_ALLOWLIST`. While those two are empty the sign-in button answers that Google sign-in is not set up.
 
 ## Sign-in
 
-Owners sign in with a link sent to their email address. There are no passwords.
+Owners sign in with Google. There are no passwords and no email from Bugzap. Sign-in by emailed link was replaced on 2026-11-18, before any owner had used it.
 
-- **Allowlist.** `SIGNUP_ALLOWLIST` is a required secret holding addresses (`owner@example.com`) and whole domains (`@example.com`), separated by commas or whitespace. An empty list admits nobody. It is checked when a link is requested and again on every signed-in request, so removing an address ends that owner's sessions and unused links at once.
-- **No enumeration.** Every well-formed address gets the same "check your email" page, whether or not it is allowed, and a storage failure gets that page too.
-- **Links.** A link carries 256 random bits, works once, and expires after 15 minutes. Only its SHA-256 is stored. Following the link shows a button; pressing the button is what signs in, so mail scanners and link previews cannot spend it.
-- **Limits.** Link requests are limited to five a minute per IP address and per email address, and one address can hold at most five unused links.
-- **Accounts.** The first successful sign-in creates the owner's account. Requesting a link creates only a bare user row, so links requested for addresses nobody controls do not create tenants.
+- **The flow.** The Sign in with Google link sends the browser to Google with a `state`, a `nonce`, and a PKCE challenge, and keeps their originals in a cookie that lasts ten minutes and is used once. Google sends the browser back to `/login/google/callback` with a code. The Worker checks the `state` against the cookie, then exchanges the code for an ID token directly with Google, using the client secret and the PKCE verifier.
+- **What is checked.** The token must be issued by Google, for this app's client id, unexpired, carrying this attempt's `nonce`, with an email address Google marks as verified and is the authority for: a Gmail address, or a Google Workspace account whose hosted domain (`hd`) is the address's domain. A personal Google account made with an outside address is refused, because Google verified that address once and cannot say who holds it now. The token is trusted because it comes straight from Google's token endpoint over TLS; a token arriving any other way is never read.
+- **Allowlist.** `SIGNUP_ALLOWLIST` is a required secret holding addresses (`owner@example.com`) and whole domains (`@example.com`), separated by commas or whitespace. An empty list admits nobody. It is checked at sign-in and again on every signed-in request, so removing an address ends that owner's sessions at once.
+- **Identity.** A person is known by Google's stable account id, stored on first sign-in, not by their address. If their address changes at Google their account follows. If an address later belongs to a different Google account, that account is refused: it does not inherit the previous holder's sites. If a known person's address moves off the allowlist, their existing sessions end the next time they try to sign in, as well as on their next request.
+- **Accounts.** The first successful sign-in creates the owner's account. Nothing is stored for a Google account that is not on the allowlist.
 - **Sessions.** A session lasts 30 days. The cookie is `__Host-bz_session` (`HttpOnly`, `Secure`, `SameSite=Lax`), holding a random token whose hash is stored. Plain-HTTP localhost uses `bz_session`, because browsers refuse the `__Host-` prefix without `Secure`. Signing out deletes the session on the server.
 - **Cross-site requests.** Every state change is a form post, refused unless its `Origin` header is the dashboard's own origin, or the browser withholds the origin and marks the request `Sec-Fetch-Site: same-origin`.
 - **Roles.** Only a membership with the `owner` role can use the dashboard. The `member` role exists in the schema and has no screens yet.
@@ -47,12 +47,12 @@ Each site has an inbox at `/sites/<key>/reports`, newest first, 50 to a page, wi
 - **Triage.** The owner can change the title, the state, the status the reporter is told, a priority from P0 to P3, and a private note. The reporter's words are never edited.
 - **Images.** The screenshot bucket is private. Images are served only through `/reports/<id>/images/<image>`, which needs the owner's session and sends `nosniff`, a sandboxing Content Security Policy, and `Cache-Control: private, no-store`.
 - **Open on page.** This opens the report's page with that report's pin drawn on it, even though the owner is not the reporter and may not be signed in to the host site. The link carries a token in the URL fragment that names one report and lasts 15 minutes. The widget removes it from the address bar and uses it to fetch that single pin. It works only on the report's own page, on an origin the site still allows; spam is never drawn. A whole-page report opens its page with no token. Two limits: the token is readable by the host page's own scripts for the moment before the widget removes it, as anything in a page's URL is, so it is scoped to one pin and 15 minutes; and reports store their page without its fragment, so on an app that routes on the fragment the link opens the app's root, not the screen the report was filed on.
-- **New-report mail.** When a report commits, each owner of the account is mailed the reporter's words and a link to the report. In `console` mode only the link is printed, so a reporter's words and name stay out of the logs.
+- **New-report notice.** When a report commits, a notice is prepared for each owner of the account with the reporter's words and a link to the report. No mail is sent yet: `MAIL_MODE` is `console`, which writes only the link to the Worker's log, so a reporter's words and name stay out of the logs. Real delivery needs a sending domain.
 
 ## Hourly sweep
 
-A cron trigger runs once an hour and removes expired sign-in links and sessions, user rows for addresses that asked for a link and never signed in, the stored copy of a rotated-out secret once its 24 hours are up, and screenshots in the bucket that no report claims and that are more than a day old. Each run handles at most 2,000 rows per table and 1,000 bucket objects, and carries on where it stopped. Locally, `curl http://localhost:2833/cdn-cgi/handler/scheduled` runs it once.
+A cron trigger runs once an hour and removes expired sessions, the stored copy of a rotated-out secret once its 24 hours are up, and screenshots in the bucket that no report claims and that are more than a day old. Each run handles at most 2,000 rows per table and 1,000 bucket objects, and carries on where it stopped. Locally, `curl http://localhost:2833/cdn-cgi/handler/scheduled` runs it once.
 
 ## Deploying
 
-A deployed Worker needs the `SIGNUP_ALLOWLIST` secret alongside `SITE_KEK`, both migrations applied to the remote database, and the cron trigger in `wrangler.jsonc`. Until a sending domain exists, `MAIL_MODE` stays `console` and sign-in links and new-report notices are read from the Worker's logs (`wrangler tail`), which only the Cloudflare account owner can see. Switching to real mail needs SPF and DKIM records on the sending domain.
+[deploy.md](deploy.md) covers the environments, the secrets, the Google OAuth client, and the deploy scripts.
