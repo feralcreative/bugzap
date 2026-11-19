@@ -85,8 +85,7 @@
         {
           "binding": "DB",
           "database_name": "bugzap-staging",
-          // Replace with the id `wrangler d1 create bugzap-staging` prints.
-          "database_id": "00000000-0000-0000-0000-000000000000",
+          "database_id": "1f74b7db-064b-4927-b9cd-a1676dbbd626",
           "migrations_dir": "migrations",
         },
       ],
